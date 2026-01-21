@@ -25,9 +25,18 @@ from utils.dataframe_utils import (
     op_gravada_negativo_CN_externos,
 )
 
-# Se você já tiver um "adicionar_coluna_tasa" genérico nos utils, importe-o.
-# Caso não tenha, você pode reutilizar a ideia do DUAS: mergear a data com st.session_state.tasa_df.
-# from utils.dataframe_utils import adicionar_coluna_tasa
+
+def adicionar_coluna_tasa_externos(df, cambio_df):
+    if cambio_df is None or cambio_df.empty or "Fecha de Emisión" not in df.columns:
+        return df
+    dft = df.copy()
+    dft["Fecha_tmp"] = pd.to_datetime(dft["Fecha de Emisión"], errors="coerce", dayfirst=True)
+    tasa = cambio_df.copy()
+    tasa["Data"] = pd.to_datetime(tasa["Data"], errors="coerce", dayfirst=True)
+    dft = dft.merge(tasa[["Data", "Venta"]], how="left", left_on="Fecha_tmp", right_on="Data")
+    dft.rename(columns={"Venta": "Tasa"}, inplace=True)
+    dft.drop(columns=["Fecha_tmp","Data"], inplace=True)
+    return dft
 
 def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
     """Extrai texto de todas as páginas do PDF via PyMuPDF."""
