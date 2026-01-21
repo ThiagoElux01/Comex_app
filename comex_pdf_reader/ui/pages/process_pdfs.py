@@ -158,7 +158,7 @@ def render():
             if clear_clicked:
                 st.session_state.acao_selecionada = None
                 st.session_state.uploader_key = "uploader_none"
-                st.experimental_rerun()
+                st.rerun()
 
             # Execução — MANTENHA este bloco DENTRO do if has_action (não dedentar!)
             if run_clicked and uploaded_files:
