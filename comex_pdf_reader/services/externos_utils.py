@@ -1,4 +1,9 @@
 
+# services/externos_utils.py  (ACRÉSCIMO DE IMPORTS NO TOPO)
+import re
+import pandas as pd
+from datetime import datetime
+
 def identificar_Proveedor(df):
     # Ordem de prioridade: os mais específicos primeiro
     fornecedores = [
