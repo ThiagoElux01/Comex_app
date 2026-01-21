@@ -163,9 +163,6 @@ def render():
             # Execução — MANTENHA este bloco DENTRO do if has_action (não dedentar!)
             if run_clicked and uploaded_files:
                 acao = st.session_state.acao_selecionada
-                # logo após definir `acao = st.session_state.acao_selecionada`
-                st.caption(f"DEBUG: acao={acao} | EXTERNOS_AVAILABLE={EXTERNOS_AVAILABLE}")
-
                 nome_acao = ACTIONS[acao]
                 status = st.empty()
                 progress = st.progress(0, text=f"Iniciando fluxo {nome_acao}...")
