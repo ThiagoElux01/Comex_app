@@ -5,8 +5,9 @@ import pandas as pd
 import fitz  # PyMuPDF
 from typing import List, Optional
 
-# Suas funções já existentes (cole-as em utils/dataframe_utils.py, ou ajuste estes imports)
-from utils.dataframe_utils import (
+# ✅ Corrija o caminho do import (agora puxa do services.externos_utils)
+# ✅ Corrija o nome da função: adicionar_tip_fac_ext (tudo minúsculo)
+from services.externos_utils import (
     identificar_Proveedor,
     adicionar_provedor_iscala,
     extrair_factura,
@@ -20,7 +21,7 @@ from utils.dataframe_utils import (
     adicionar_erro,
     organizar_colunas_externos,
     adicionar_cod_autorizacion_ext,
-    adicionar_tip_fAC_ext,  # cuidado com o nome: verifique a grafia exata no seu módulo
+    adicionar_tip_fac_ext,          # <--- nome corrigido
     remover_duplicatas_source_file,
     op_gravada_negativo_CN_externos,
 )
@@ -38,7 +39,8 @@ def adicionar_coluna_tasa_externos(df, cambio_df):
     dft.drop(columns=["Fecha_tmp","Data"], inplace=True)
     return dft
 
-def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
+
+def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:   # <- garanta '->' (não '&gt;')
     """Extrai texto de todas as páginas do PDF via PyMuPDF."""
     try:
         with fitz.open(stream=BytesIO(pdf_bytes), filetype="pdf") as doc:
@@ -46,6 +48,7 @@ def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
             return text if text.strip() else "[PDF baseado em imagem - sem texto extraível]"
     except Exception:
         return "[Erro ao abrir/ler o PDF]"
+
 
 def process_externos_streamlit(
     uploaded_files: List,
@@ -71,7 +74,7 @@ def process_externos_streamlit(
 
     df = pd.DataFrame(rows)
 
-    # === Pipeline (as suas funções) ===
+    # === Pipeline (as suas funções) — nenhuma lógica alterada ===
     df = identificar_Proveedor(df)
     df = adicionar_provedor_iscala(df)
     df = extrair_factura(df)
@@ -92,19 +95,16 @@ def process_externos_streamlit(
     # Erro se não achou fornecedor
     df = adicionar_erro(df)
 
-    # Se você já tiver um util que injeta Tasa a partir de "Fecha de Emisión", chame aqui.
-    # Ex.: df = adicionar_coluna_tasa(df, cambio_df=cambio_df)
+    # (Opcional) Tasa via aba Tasa SUNAT
+    df = adicionar_coluna_tasa_externos(df, cambio_df=cambio_df)
 
-    # Regra opcional: se for moeda "00", força Tasa=1
-    # ATENÇÃO: no seu código "Cod. Moneda" = '01' por padrão; então essa condição pode nunca ativar.
-    # Ajuste para o código correto da moeda USD no seu cenário.
+    # Regra opcional: se for moeda "00", força Tasa=1 (avalie se "01" é USD no seu caso)
     if "Cod. Moneda" in df.columns:
         df.loc[df["Cod. Moneda"] == "00", "Tasa"] = 1
 
     df = adicionar_cod_autorizacion_ext(df)
-    df = adicionar_tip_fAC_ext(df)  # ajuste o nome exato da função conforme o seu arquivo
+    df = adicionar_tip_fac_ext(df)  # <--- nome corrigido
     df = organizar_colunas_externos(df)
-
     df = remover_duplicatas_source_file(df)
 
     if progress_widget:
