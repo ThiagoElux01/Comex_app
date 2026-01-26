@@ -5,8 +5,6 @@ from ui.layout import app_header, sidebar_navigation
 from settings import PAGES
 from ui.pages import home, process_pdfs, settings_page
 
-st.write("User object:", st.user)
-
 def main():
     st.set_page_config(page_title="COMEX PDF READER", page_icon="📄", layout="wide")
 
