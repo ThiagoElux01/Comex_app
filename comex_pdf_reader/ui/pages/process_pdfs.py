@@ -389,37 +389,48 @@ def render():
             else:
                 st.warning("Não foi possível obter dados da Tasa. Verifique credenciais/token/cookie.")
 
+    # -------------------------
+    # 📁 Arquivo Sharepoint  (renderiza SEMPRE, independente do tab3)
+    # -------------------------
 
-        with tab3:
-            st.subheader("📁 Arquivo Sharepoint")
-            st.caption("Carregue um arquivo Excel para leitura da aba 'all'.")
-        
-            uploaded_excel = st.file_uploader(
-                "Carregar Arquivo",
-                type=["xlsx", "xls"],
-                key="sharepoint_excel_uploader"
-            )
-        
-            if uploaded_excel:
-                try:
-                    # Lê somente a aba 'all'
-                    df_all = pd.read_excel(
-                        uploaded_excel,
-                        sheet_name="all",
-                        header=0,          # primeira linha como cabeçalho
-                        usecols="A:Z",     # colunas A até Z
-                        nrows=20000,       # até 20.000 linhas
-                        engine="openpyxl"
-                    )
-        
-                    # Armazena em sessão (opcional, mas recomendado)
-                    st.session_state["sharepoint_df"] = df_all
-        
-                    st.success("✅ DataFrame atualizado")
-        
-                except ValueError:
-                    st.error("❌ A aba 'all' não foi encontrada no arquivo Excel.")
-                except Exception as e:
-                    st.error("❌ Erro ao processar o arquivo.")
-                    st.exception(e)
+ 
+            with tab3:
+                st.subheader("📁 Arquivo Sharepoint")
+                st.caption("Carregue um arquivo Excel para leitura da aba 'all'.")
+            
+                uploaded_excel = st.file_uploader(
+                    "Carregar Arquivo",
+                    type=["xlsx", "xls"],
+                    key="sharepoint_excel_uploader"
+                )
+            
+                if uploaded_excel:
+                    try:
+                        df_all = pd.read_excel(
+                            uploaded_excel,
+                            sheet_name="all",
+                            header=0,        # primeira linha como cabeçalho
+                            usecols="A:Z",   # colunas A até Z
+                            nrows=20000,     # até 20.000 linhas
+                            engine="openpyxl"
+                        )
+            
+                        # Guarda em sessão (opcional, mas útil)
+                        st.session_state["sharepoint_df"] = df_all
+            
+                        st.success("✅ DataFrame atualizado")
+            
+                        # ✅ PREVIEW DO DATAFRAME
+                        st.dataframe(
+                            df_all,
+                            use_container_width=True,
+                            height=500
+                        )
+            
+                    except ValueError:
+                        st.error("❌ A aba 'all' não foi encontrada no arquivo Excel.")
+                    except Exception as e:
+                        st.error("❌ Erro ao processar o arquivo Excel.")
+                        st.exception(e)
+
 
