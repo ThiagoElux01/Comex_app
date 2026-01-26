@@ -47,6 +47,6 @@ def render():
 
     st.divider()
     st.info(
-        "Dúvidas sobre o conteúdo dos modelos? Vá em **Processar PDFs** e veja os campos "
+        "Nesta página é possível baixar os arquivos modelo  "
         "esperados em cada fluxo."
     )
