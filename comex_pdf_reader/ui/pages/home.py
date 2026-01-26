@@ -6,7 +6,6 @@ from pathlib import Path
 # raiz do projeto (…/comex_pdf_reader)
 BASE_DIR = Path(__file__).resolve().parents[2]
 
-# caminho correto do arquivo
 ARQUIVO_MODELO = BASE_DIR / "assets" / "modelos" / "Externos.xlsx"
 
 @st.cache_data
@@ -27,10 +26,6 @@ def render():
 
         except Exception as e:
             st.error(f"Erro ao atualizar arquivo: {e}")
-
-    # debug opcional (pode remover depois)
-    with st.expander("ℹ️ Caminho do arquivo"):
-        st.code(str(ARQUIVO_MODELO))
 
     with st.expander("Ver prévia dos dados"):
         try:
