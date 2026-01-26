@@ -1,4 +1,3 @@
-    
 import streamlit as st
 from auth import is_authenticated
 from ui.login import render_login
@@ -6,36 +5,34 @@ from ui.layout import app_header, sidebar_navigation
 from settings import PAGES
 from ui.pages import home, process_pdfs, settings_page
 from ui.pages import downloads_page
-import pandas as pd
-from pathlib import Path
 
-# Caminho do arquivo modelo
-ARQUIVO_MODELO = Path("assets/modelos/Externos.xlsx")
+def main():
+    st.set_page_config(page_title="COMEX PDF READER", page_icon="📄", layout="wide")
 
-@st.cache_data
-def carregar_modelo():
-    return pd.read_excel(ARQUIVO_MODELO)
+    if not is_authenticated():
+        render_login()
+        return
 
-def render():
-    st.subheader("Home")
+    app_header()
 
-    st.write("Atualização do arquivo de modelos externos")
+    # 1) lê a página escolhida
+    page = sidebar_navigation(PAGES)
 
-    if st.button("🔄 Update"):
-        try:
-            st.cache_data.clear()
-            df = carregar_modelo()
+    # 3) se foi disparada navegação por botão, priorize esse destino
+    if st.session_state.get("_goto_page"):
+        page = st.session_state.pop("_goto_page")
 
-            st.success("Arquivo atualizado com sucesso ✅")
-            st.info(f"📊 Total de linhas: {len(df)}")
+    # 4) roteamento
+    if page == "Home":
+        home.render()
+    elif page == "Processar PDFs":
+        process_pdfs.render()
+    elif page == "Arquivos modelo":
+        downloads_page.render()
+    elif page == "Configurações":
+        settings_page.render()
+    else:
+        st.error("Página não encontrada.")
 
-        except Exception as e:
-            st.error(f"Erro ao atualizar arquivo: {e}")
-
-    # opcional: preview
-    with st.expander("Ver prévia dos dados"):
-        try:
-            df = carregar_modelo()
-            st.dataframe(df.head(10), use_container_width=True)
-        except:
-            st.warning("Arquivo ainda não carregado.")
+if __name__ == "__main__":
+    main()
