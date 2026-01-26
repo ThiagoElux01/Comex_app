@@ -1,6 +1,15 @@
 
 import streamlit as st
 
+def is_owner() -> bool:
+    if not st.session_state.get("is_logged_in"):
+        return False
+
+    user_email = st.session_state.get("user_email", "")
+    owners = st.secrets.get("owners", {}).get("emails", [])
+
+    return user_email in owners
+
 def _get_authorized_users() -> dict:
     """Lê usuários autorizados de st.secrets['auth']."""
     return dict(st.secrets.get("auth", {}))
