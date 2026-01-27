@@ -1188,4 +1188,3 @@ def adicionar_pec_sharepoint(df_externos, df_sharepoint):
     if df_sharepoint is None or df_sharepoint.empty:
         return df_externos
     return merge_pec_fast(df_externos, df_sharepoint)
-
