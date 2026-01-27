@@ -104,9 +104,6 @@ def process_externos_streamlit(
 
     df = adicionar_cod_autorizacion_ext(df)
     df = adicionar_tip_fac_ext(df)  # <--- nome corrigido
-
-    df = df.drop(columns=["conteudo_pdf"]
-
     df = organizar_colunas_externos(df)
     df = remover_duplicatas_source_file(df)
 
