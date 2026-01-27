@@ -396,16 +396,18 @@ def render():
     # -------------------------
     # 📁 Arquivo Sharepoint
     # -------------------------
+
     with tab3:
+    
         st.subheader("📁 Arquivo Sharepoint")
         st.caption("Carregue um arquivo Excel para leitura da aba 'all'.")
-
+    
         uploaded_excel = st.file_uploader(
             "Carregar Arquivo",
             type=["xlsx", "xls"],
             key="sharepoint_excel_uploader"
         )
-
+    
         if uploaded_excel:
             try:
                 df_all = pd.read_excel(
@@ -416,25 +418,50 @@ def render():
                     nrows=20000,
                     engine="openpyxl"
                 )
-
-                # 🔽 AJUSTES DE COLUNAS
+    
                 from services.sharepoint_utils import ajustar_sharepoint_df
                 df_all = ajustar_sharepoint_df(df_all)
-
-                # Guarda em sessão
+    
                 st.session_state["sharepoint_df"] = df_all
-
-                st.success("✅ DataFrame atualizado")
-
-                # Preview
+                st.success("✔️ DataFrame atualizado")
+    
                 st.dataframe(
                     df_all,
                     use_container_width=True,
                     height=500
                 )
-
+    
+                # ➜ ADICIONAR DOWNLOAD AQUI
+                st.subheader("⬇️ Downloads do Arquivo SharePoint")
+    
+                col_csv, col_xlsx = st.columns(2)
+    
+                with col_csv:
+                    st.download_button(
+                        label="Baixar CSV (SharePoint)",
+                        data=df_all.to_csv(index=False).encode("utf-8"),
+                        file_name="sharepoint_all.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+    
+                with col_xlsx:
+                    buffer = BytesIO()
+                    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                        df_all.to_excel(writer, index=False, sheet_name="SharePoint")
+                    buffer.seek(0)
+    
+                    st.download_button(
+                        label="Baixar XLSX (SharePoint)",
+                        data=buffer,
+                        file_name="sharepoint_all.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+    
             except ValueError:
                 st.error("❌ A aba 'all' não foi encontrada no arquivo Excel.")
             except Exception as e:
                 st.error("❌ Erro ao processar o arquivo Excel.")
                 st.exception(e)
+
