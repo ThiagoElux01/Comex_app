@@ -6,24 +6,39 @@ import streamlit as st
 
 def adicionar_tasa_sharepoint(df, tasa_df):
     """
-    Adiciona a coluna Tasa ao DataFrame SharePoint baseado na coluna Fecha_Emision.
+    Adiciona a coluna Tasa_Sharepoint ao DataFrame SharePoint,
+    fazendo merge seguro baseado apenas na data (ignorando hora/timezone).
     """
 
+    # Caso não exista Tasa carregada no session_state
     if tasa_df is None or tasa_df.empty:
-        df["Tasa"] = ""
+        df["Tasa_Sharepoint"] = ""
         return df
 
-    # Converte as datas do DF SharePoint
     df_tmp = df.copy()
+
+    # ------------------------------------------------------------
+    # 1) Converter Fecha_Emision para datetime (robusto)
+    # ------------------------------------------------------------
     df_tmp["Fecha_Emision_tmp"] = pd.to_datetime(
-        df_tmp["Fecha_Emision"], format="%d/%m/%Y", errors="coerce"
-    )
+        df_tmp["Fecha_Emision"],
+        dayfirst=True,          # permite dd/mm/yyyy, d/m/yyyy, dd-mm-yyyy
+        errors="coerce"
+    ).dt.normalize()            # tira hora, timezone, etc.
 
-    # Prepara TASA
+    # ------------------------------------------------------------
+    # 2) Preparar Tasa SUNAT
+    # ------------------------------------------------------------
     tasa = tasa_df.copy()
-    tasa["Data"] = pd.to_datetime(tasa["Data"], errors="coerce")
+    tasa["Data"] = pd.to_datetime(
+        tasa["Data"],
+        dayfirst=True,
+        errors="coerce"
+    ).dt.normalize()
 
-    # Merge baseado na data
+    # ------------------------------------------------------------
+    # 3) Merge seguro
+    # ------------------------------------------------------------
     df_tmp = df_tmp.merge(
         tasa[["Data", "Venta"]],
         left_on="Fecha_Emision_tmp",
@@ -31,16 +46,23 @@ def adicionar_tasa_sharepoint(df, tasa_df):
         how="left"
     )
 
-    # Renomeia
-    df_tmp.rename(columns={"Venta": "Tasa"}, inplace=True)
+    # ------------------------------------------------------------
+    # 4) Renomear coluna corretamente
+    # ------------------------------------------------------------
+    df_tmp.rename(columns={"Venta": "Tasa_Sharepoint"}, inplace=True)
 
-    # Limpa colunas auxiliares
+    # ------------------------------------------------------------
+    # 5) Limpar colunas auxiliares
+    # ------------------------------------------------------------
     df_tmp = df_tmp.drop(columns=["Fecha_Emision_tmp", "Data"], errors="ignore")
 
-    # Converte Tasa para número
-    df_tmp["Tasa"] = pd.to_numeric(df_tmp["Tasa"], errors="coerce")
+    # ------------------------------------------------------------
+    # 6) Converter Tasa para número
+    # ------------------------------------------------------------
+    df_tmp["Tasa_Sharepoint"] = pd.to_numeric(df_tmp["Tasa_Sharepoint"], errors="coerce")
 
     return df_tmp
+
 # ============================================================
 # FUNÇÃO UNIVERSAL PARA CORRIGIR DATAS DO SHAREPOINT
 # ============================================================
