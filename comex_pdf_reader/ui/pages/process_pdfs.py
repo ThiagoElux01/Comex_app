@@ -395,6 +395,7 @@ def render():
 
  
 
+
         with tab3:
             st.subheader("📁 Arquivo Sharepoint")
             st.caption("Carregue um arquivo Excel para leitura da aba 'all'.")
@@ -410,18 +411,22 @@ def render():
                     df_all = pd.read_excel(
                         uploaded_excel,
                         sheet_name="all",
-                        header=0,        # primeira linha como cabeçalho
-                        usecols="A:Z",   # colunas A até Z
-                        nrows=20000,     # até 20.000 linhas
+                        header=0,
+                        usecols="A:Z",
+                        nrows=20000,
                         engine="openpyxl"
                     )
         
-                    # Guarda em sessão (opcional, mas útil)
+                    # 🔽 IMPORTANTE — IMPORTA E APLICA OS AJUSTES
+                    from services.sharepoint_utils import ajustar_sharepoint_df
+                    df_all = ajustar_sharepoint_df(df_all)
+        
+                    # Guarda em sessão
                     st.session_state["sharepoint_df"] = df_all
         
                     st.success("✅ DataFrame atualizado")
         
-                    # ✅ PREVIEW DO DATAFRAME
+                    # Preview
                     st.dataframe(
                         df_all,
                         use_container_width=True,
@@ -433,6 +438,4 @@ def render():
                 except Exception as e:
                     st.error("❌ Erro ao processar o arquivo Excel.")
                     st.exception(e)
-
-
-
+        )
