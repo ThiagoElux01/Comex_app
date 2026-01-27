@@ -125,22 +125,44 @@ def process_externos_streamlit(
     # Heurística "Lineaabajo"
     # =============================
     MAP_LINEA = {
+        # --- Itens canônicos principais ---
         "REFRIGERATOR": 36,
         "CHEST FREEZER": 35,
+        "FREEZER": 35,
         "STOVE": 38,
-        "WASHER": 25,
-        "WASHING MACHINE": 25,
-        "MICROWAVE OVEN": 22,
-        "COCINA": 22,
-        "VACUUM CLEANER": 10,
-        "AIR FRYER": 22,
-        "SECADORA": 45,
-        "GAS OVEN": 38,
-        "GAS HOB": 38,
-        "DISHWASHER": 24,
-        "SPARE PARTS": 34,
-        "COOKER": 22,
+        "COOKER": 22,            # categoria genérica de cozinha
+        "OVEN": 38,              # genérico; temos também variantes específicas abaixo
         "ELECTRIC OVEN": 22,
+        "GAS OVEN": 38,
+        "MICROWAVE OVEN": 22,    # mantendo seu valor original (lista tinha 38)
+        "WASHING MACHINE": 25,
+        "WASHER": 25,
+        "DRYER": 45,             # equivalente a SECADORA
+        "SECADORA": 45,
+        "VACUUM CLEANER": 10,
+        "ROBOTIC VACUUM CLEANERS": 10,
+        "STEAM IRON": 34,
+        "GARMENT STEAMER": 24,   # >>> adicionado conforme pedido (24)
+        "HANDHELD GARMENT STEAMER": 34,
+        "DISHWASHER": 24,
+        "GAS HOB": 38,           # mantendo seu valor original (lista tinha 22)
+        "COOKER HOOD": 22,
+        "COCINA": 22,
+        "AIR FRYER": 22,
+        "SPLIT AIR CONDITIONER": 41,
+        "AIR CONDITIONER": 41,   # >>> adicionado conforme pedido (41)
+        "WATER DISPENSER": 22,
+        "WINE COOLER": 22,
+        "RICE COOKER": 22,
+        "JUICER": 22,
+        "BLENDER": 34,
+        "KETTLE": 34,
+        "ELECTRICAL COOKING": 22,
+        "SPARE PARTS": 34,
+    
+        # --- Itens que você já usava e fazem sentido manter ---
+        "SEC ELEC": 25,
+        "KE4CT": 22,
     }
 
     def detectar_linea(texto_pdf: str) -> Optional[int]:
