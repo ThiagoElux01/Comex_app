@@ -1102,7 +1102,6 @@ def op_gravada_negativo_CN_externos(df):
 # MERGE PEC DO SHAREPOINT PELO NOME DO ARQUIVO
 # ===========================================================
 
-
 def merge_pec_fast(df_externos, df_sharepoint):
 
     df_ext = df_externos.copy()
@@ -1118,9 +1117,29 @@ def merge_pec_fast(df_externos, df_sharepoint):
     }
     df_sp = df_sp.rename(columns=renames)
 
-    # Normaliza texto para matching
-    df_ext["key_ext"] = df_ext["source_file"].astype(str).str.lower()
-    df_sp["key_sp"]  = df_sp["name"].astype(str).str.lower()
+    # ============================
+    # Função para normalizar nomes
+    # ============================
+    import re
+
+    def normalizar_nome(s):
+        if s is None:
+            return ""
+        s = str(s)
+
+        # Remover caracteres invisíveis
+        s = s.replace("\u200b", "")   # zero‑width space
+        s = s.replace("\u00a0", " ")  # no-break space (NBSP)
+
+        # Remover múltiplos espaços
+        s = re.sub(r"\s+", " ", s)
+
+        # Normalizar
+        return s.strip().lower()
+
+    # Normaliza texto para matching (AQUI É A CORREÇÃO CRÍTICA)
+    df_ext["key_ext"] = df_ext["source_file"].apply(normalizar_nome)
+    df_sp["key_sp"]  = df_sp["name"].apply(normalizar_nome)
 
     # Merge cartesiano
     df_ext["_tmp"] = 1
@@ -1147,7 +1166,6 @@ def merge_pec_fast(df_externos, df_sharepoint):
         "numero_de_documento",
         "Fecha_Emision",
     ]
-
     colunas_extras = [c for c in colunas_extras if c in df_all.columns]
 
     df_merge = df_all[["source_file"] + colunas_extras].drop_duplicates()
@@ -1162,9 +1180,6 @@ def merge_pec_fast(df_externos, df_sharepoint):
 
 
 def adicionar_pec_sharepoint(df_externos, df_sharepoint):
-    """
-    Função utilizada pelo service Externos para adicionar o número PEC.
-    """
     if df_sharepoint is None or df_sharepoint.empty:
         return df_externos
     return merge_pec_fast(df_externos, df_sharepoint)
