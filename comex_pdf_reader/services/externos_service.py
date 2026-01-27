@@ -108,6 +108,15 @@ def process_externos_streamlit(
     df = remover_duplicatas_source_file(df)
     df = df.drop(columns=["conteudo_pdf"], errors="ignore")
 
+    
+    # ===========================================================
+    # ADICIONA PEC VINDO DO SHAREPOINT (SE EXISTIR)
+    # ===========================================================
+    from services.externos_utils import adicionar_pec_sharepoint
+    
+    sharepoint_df = st.session_state.get("sharepoint_df")
+    df = adicionar_pec_sharepoint(df, sharepoint_df)
+
     if progress_widget:
         progress_widget.progress(100, text="Concluído (Externos).")
     if status_widget:
