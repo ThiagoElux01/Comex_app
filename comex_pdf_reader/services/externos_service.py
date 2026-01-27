@@ -152,6 +152,8 @@ def process_externos_streamlit(
         "ELECTRIC OVEN": 22,
     }
 
+    
+    from typing import Optional  # (já existe no arquivo)
     def detectar_linea(texto_pdf: str) -> Optional[int]:
         if not isinstance(texto_pdf, str):
             return None
