@@ -229,7 +229,14 @@ def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
     # ============================================================
     # 5) ADICIONAR TASA USANDO A COLUNA Fecha_Emision
     # ============================================================
+
+    # 5) Merge com Tasa (vinda do Streamlit session_state)
     tasa_df = st.session_state.get("tasa_df")
     df = adicionar_tasa_sharepoint(df, tasa_df)
-
+    
+    # ✔ Renomeia aqui mesmo!
+    if "Tasa" in df.columns:
+        df = df.rename(columns={"Tasa": "Tasa_Sharepoint"})
+    
     return df
+
