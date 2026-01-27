@@ -1177,7 +1177,11 @@ def merge_pec_fast(df_externos, df_sharepoint):
     # Remove colunas auxiliares
     df_final = df_final.drop(columns=["key_ext", "_tmp"], errors="ignore")
 
+    # Remove colunas duplicadas — mantém a última (SharePoint)
+    df_final = df_final.loc[:, ~df_final.columns.duplicated(keep="last")]
+    
     return df_final
+
 
 
 def adicionar_pec_sharepoint(df_externos, df_sharepoint):
