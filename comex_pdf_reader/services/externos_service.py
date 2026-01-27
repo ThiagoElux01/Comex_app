@@ -133,6 +133,36 @@ def process_externos_streamlit(
     from services.externos_utils import adicionar_pec_sharepoint
     sharepoint_df = st.session_state.get("sharepoint_df")
     df = adicionar_pec_sharepoint(df, sharepoint_df)
+    MAP_LINEA = {
+        "REFRIGERATOR": 36,
+        "CHEST FREEZER": 35,
+        "STOVE": 38,
+        "WASHER": 25,
+        "WASHING MACHINE": 25,
+        "MICROWAVE OVEN": 22,
+        "COCINA": 22,
+        "VACUUM CLEANER": 10,
+        "AIR FRYER": 22,
+        "SECADORA": 45,
+        "GAS OVEN": 38,
+        "GAS HOB": 38,
+        "DISHWASHER": 24,
+        "SPARE PARTS": 34,
+        "COOKER": 22,
+        "ELECTRIC OVEN": 22,
+    }
+
+    def detectar_linea(texto_pdf: str) -> int | None:
+        if not isinstance(texto_pdf, str):
+            return None
+        up = texto_pdf.upper()
+        for ref, num in MAP_LINEA.items():
+            if ref in up:
+                return num
+        return None
+
+    # 👇 CRIAR ANTES DE ORGANIZAR AS COLUNAS
+    df["Lineaabajo"] = df["conteudo_pdf"].apply(detectar_linea)
 
     # --------------------------------------------------------
     # CRIAÇÃO DA COLUNA Lineaabajo COM BASE NO CONTEÚDO DO PDF
