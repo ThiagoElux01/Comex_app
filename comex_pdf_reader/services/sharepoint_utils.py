@@ -61,7 +61,7 @@ def corrigir_data_sharepoint(valor):
     meses = {
         # PT
         "jan": "Jan", "janeiro": "Jan",
-       março": "Mar",
+        "mar": "mar", "março": "Mar",
         "abr": "Apr", "abril": "Apr",
         "mai": "May", "maio": "May",
         "jun": "Jun", "junho": "Jun",
