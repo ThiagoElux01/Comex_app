@@ -1080,7 +1080,7 @@ def remover_duplicatas_source_file(df):
 
 def organizar_colunas_externos(df):
 
-    colunas_desejadas = ['source_file', 'Proveedor', 'Proveedor Iscala', 'Factura','Tipo Doc' ,'Cód. de Autorización','Tipo de Factura','Fecha de Emisión','Moneda', 
+    colunas_desejadas = ['source_file','conteudo_pdf', 'Proveedor', 'Proveedor Iscala', 'Factura','Tipo Doc' ,'Cód. de Autorización','Tipo de Factura','Fecha de Emisión','Moneda', 
                          'Cod. Moneda', 'Amount', 'Tasa', 'Cuenta', 'Error']
     
     colunas_presentes = [col for col in colunas_desejadas if col in df.columns]
