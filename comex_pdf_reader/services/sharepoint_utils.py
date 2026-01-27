@@ -3,6 +3,43 @@ import pandas as pd
 import re
 from datetime import datetime
 
+def adicionar_tasa_sharepoint(df, tasa_df):
+    """
+    Adiciona a coluna Tasa ao DataFrame SharePoint baseado na coluna Fecha_Emision.
+    """
+
+    if tasa_df is None or tasa_df.empty:
+        df["Tasa"] = ""
+        return df
+
+    # Converte as datas do DF SharePoint
+    df_tmp = df.copy()
+    df_tmp["Fecha_Emision_tmp"] = pd.to_datetime(
+        df_tmp["Fecha_Emision"], format="%d/%m/%Y", errors="coerce"
+    )
+
+    # Prepara TASA
+    tasa = tasa_df.copy()
+    tasa["Data"] = pd.to_datetime(tasa["Data"], errors="coerce")
+
+    # Merge baseado na data
+    df_tmp = df_tmp.merge(
+        tasa[["Data", "Venta"]],
+        left_on="Fecha_Emision_tmp",
+        right_on="Data",
+        how="left"
+    )
+
+    # Renomeia
+    df_tmp.rename(columns={"Venta": "Tasa"}, inplace=True)
+
+    # Limpa colunas auxiliares
+    df_tmp = df_tmp.drop(columns=["Fecha_Emision_tmp", "Data"], errors="ignore")
+
+    # Converte Tasa para número
+    df_tmp["Tasa"] = pd.to_numeric(df_tmp["Tasa"], errors="coerce")
+
+    return df_tmp
 # ============================================================
 # FUNÇÃO UNIVERSAL PARA CORRIGIR DATAS DO SHAREPOINT
 # ============================================================
