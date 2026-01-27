@@ -1103,20 +1103,22 @@ def op_gravada_negativo_CN_externos(df):
 # ===========================================================
 
 
-
-
 def merge_pec_fast(df_externos, df_sharepoint):
 
     df_ext = df_externos.copy()
     df_sp = df_sharepoint.copy()
 
-    # Renomeia PEC corretamente (#pec → PEC)
-    if "#pec" in df_sp.columns:
-        df_sp = df_sp.rename(columns={"#pec": "PEC"})
-    elif "pec" in df_sp.columns:
-        df_sp = df_sp.rename(columns={"pec": "PEC"})
+    # ============================
+    # Padroniza nomes das colunas
+    # ============================
+    renames = {
+        "#pec": "PEC",
+        "pec": "PEC",
+        "fecha_de_emisipn_del_documento": "Fecha_Emision"
+    }
+    df_sp = df_sp.rename(columns=renames)
 
-    # Normaliza texto
+    # Normaliza texto para matching
     df_ext["key_ext"] = df_ext["source_file"].astype(str).str.lower()
     df_sp["key_sp"]  = df_sp["name"].astype(str).str.lower()
 
@@ -1133,17 +1135,30 @@ def merge_pec_fast(df_externos, df_sharepoint):
 
     df_all = df_all[df_all.apply(match, axis=1)]
 
-    # PEC encontrado
-    df_pec = df_all[["source_file", "PEC"]].drop_duplicates()
+    # ===============================
+    # Seleciona TODAS as colunas extras
+    # ===============================
+    colunas_extras = [
+        "PEC",
+        "proveedor",
+        "importe_documento",
+        "moneda",
+        "tipo_doc",
+        "numero_de_documento",
+        "Fecha_Emision",
+    ]
 
-    # Junta no dataframe final
-    df_final = df_ext.merge(df_pec, on="source_file", how="left")
+    colunas_extras = [c for c in colunas_extras if c in df_all.columns]
 
-    # REMOVE colunas auxiliares
+    df_merge = df_all[["source_file"] + colunas_extras].drop_duplicates()
+
+    # Merge final no dataframe Externos
+    df_final = df_ext.merge(df_merge, on="source_file", how="left")
+
+    # Remove colunas auxiliares
     df_final = df_final.drop(columns=["key_ext", "_tmp"], errors="ignore")
 
     return df_final
-
 
 
 def adicionar_pec_sharepoint(df_externos, df_sharepoint):
@@ -1153,3 +1168,4 @@ def adicionar_pec_sharepoint(df_externos, df_sharepoint):
     if df_sharepoint is None or df_sharepoint.empty:
         return df_externos
     return merge_pec_fast(df_externos, df_sharepoint)
+
