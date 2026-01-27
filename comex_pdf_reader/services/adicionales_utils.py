@@ -461,3 +461,65 @@ def organizar_colunas_adicionales(df: pd.DataFrame) -> pd.DataFrame:
 
 def remover_duplicatas_source_file(df: pd.DataFrame) -> pd.DataFrame:
     return df.drop_duplicates(subset='source_file', keep='first')
+
+
+import pandas as pd
+import re
+
+def merge_sharepoint_adicionales(df_adic, df_sp):
+
+    df_ext = df_adic.copy()
+    df_sp = df_sp.copy()
+
+    # Padroniza colunas já renomeadas no SharePoint
+    renames = {
+        "#pec": "PEC",
+        "pec": "PEC",
+        "fecha_de_emisipn_del_documento": "Fecha_Emision",
+    }
+    df_sp = df_sp.rename(columns=renames)
+
+    # Normaliza texto para comparação
+    df_ext["key_ext"] = df_ext["source_file"].astype(str).str.lower()
+    df_sp["key_sp"] = df_sp["name"].astype(str).str.lower()
+
+    # Merge cartesiano
+    df_ext["_tmp"] = 1
+    df_sp["_tmp"] = 1
+    df_all = df_ext.merge(df_sp, on="_tmp")
+
+    # Compatibilidade textual
+    def match(row):
+        ext = row["key_ext"]
+        sp = row["key_sp"]
+        return ext in sp or sp in ext
+
+    df_all = df_all[df_all.apply(match, axis=1)]
+
+    # Colunas extras a trazer
+    colunas_extras = [
+        "PEC",
+        "proveedor",
+        "importe_documento",
+        "moneda",
+        "tipo_doc",
+        "numero_de_documento",
+        "Fecha_Emision",
+    ]
+    colunas_extras = [c for c in colunas_extras if c in df_all.columns]
+
+    df_merge = df_all[["source_file"] + colunas_extras].drop_duplicates()
+
+    # Merge final no DF Adicionales
+    df_final = df_ext.merge(df_merge, on="source_file", how="left")
+
+    # Remove colunas auxiliares
+    df_final = df_final.drop(columns=["key_ext", "_tmp"], errors="ignore")
+
+    return df_final
+
+
+def adicionar_sharepoint_adicionales(df_adic, df_sharepoint):
+    if df_sharepoint is None or df_sharepoint.empty:
+        return df_adic
+    return merge_sharepoint_adicionales(df_adic, df_sharepoint)
