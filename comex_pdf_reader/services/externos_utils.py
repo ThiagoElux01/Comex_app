@@ -1096,3 +1096,48 @@ def op_gravada_negativo_CN_externos(df):
             axis=1
         )
     return df
+
+
+# ===========================================================
+# MERGE PEC DO SHAREPOINT PELO NOME DO ARQUIVO
+# ===========================================================
+
+def merge_pec_fast(df_externos, df_sharepoint):
+
+    df_ext = df_externos.copy()
+    df_sp = df_sharepoint.copy()
+
+    # Normaliza texto
+    df_ext["key_ext"] = df_ext["source_file"].astype(str).str.lower()
+    df_sp["key_sp"] = df_sp["name"].astype(str).str.lower()
+
+    # Marca para combinar tudo
+    df_ext["tmp"] = 1
+    df_sp["tmp"] = 1
+
+    # Faz todas as combinações possíveis (cartesiano)
+    df_all = df_ext.merge(df_sp, on="tmp", suffixes=("_ext","_sp"))
+
+    # Mantém somente onde há compatibilidade de nome
+    df_all = df_all[
+        df_all["key_ext"].str.contains(df_all["key_sp"], na=False)
+        |
+        df_all["key_sp"].str.contains(df_all["key_ext"], na=False)
+    ]
+
+    # Só precisamos de source_file + pec
+    df_pec = df_all[["source_file", "pec"]].drop_duplicates()
+
+    # Merge final inserindo a PEC no dataframe original
+    df_final = df_externos.merge(df_pec, on="source_file", how="left")
+
+    return df_final
+
+
+def adicionar_pec_sharepoint(df_externos, df_sharepoint):
+    """
+    Função utilizada pelo service Externos para adicionar o número PEC.
+    """
+    if df_sharepoint is None or df_sharepoint.empty:
+        return df_externos
+    return merge_pec_fast(df_externos, df_sharepoint)
