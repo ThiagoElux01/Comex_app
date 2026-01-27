@@ -147,10 +147,13 @@ def corrigir_data_sharepoint(valor):
 # ============================================================
 # AJUSTAR SHAREPOINT DF
 # ============================================================
+
 def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
+    # ============================================================
     # 1) Normalizar nomes de colunas
+    # ============================================================
     df.columns = (
         df.columns
         .str.strip()
@@ -159,7 +162,9 @@ def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
         .str.lower()
     )
 
+    # ============================================================
     # 2) IMPORTES NUMÉRICOS
+    # ============================================================
     possiveis_nomes_importe = [
         "importe_documento",
         "importe_del_documento",
@@ -185,11 +190,9 @@ def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = df[col].apply(clean_number)
 
-
     # ============================================================
-    # 3) DATAS → criar coluna unificada Fecha_Emision
+    # 3) UNIFICAR COLUNA DE DATA → Fecha_Emision
     # ============================================================
-    
     colunas_data_possiveis = [
         "fecha_de_emisipn_del_documento",
         "fecha_de_emision_del_documento",
@@ -199,26 +202,21 @@ def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
         "fechadeemision",
         "emision"
     ]
-    
-    # identifica a primeira coluna válida
+
     col_data_original = None
     for c in colunas_data_possiveis:
         if c in df.columns:
             col_data_original = c
             break
-    
-    # cria coluna unificada
+
     if col_data_original:
         df["Fecha_Emision"] = df[col_data_original].apply(corrigir_data_sharepoint)
     else:
         df["Fecha_Emision"] = ""
 
-
-    for col in possiveis_nomes_data:
-        if col in df.columns:
-            df[col] = df[col].apply(corrigir_data_sharepoint)
-
-    # 4) PROVEEDOR → texto antes do '-'
+    # ============================================================
+    # 4) PROVEEDOR → texto antes do "-"
+    # ============================================================
     if "proveedor" in df.columns:
         df["proveedor"] = (
             df["proveedor"]
@@ -228,7 +226,9 @@ def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
             .str.strip()
         )
 
-    # 5) Merge com Tasa (vinda do Streamlit session_state)
+    # ============================================================
+    # 5) ADICIONAR TASA USANDO A COLUNA Fecha_Emision
+    # ============================================================
     tasa_df = st.session_state.get("tasa_df")
     df = adicionar_tasa_sharepoint(df, tasa_df)
 
