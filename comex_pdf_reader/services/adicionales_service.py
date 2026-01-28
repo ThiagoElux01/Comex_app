@@ -124,4 +124,9 @@ def process_adicionales_streamlit(
     # 8) Tasa ← Tasa_Sharepoint
     preencher_vazio("Tasa", "Tasa_Sharepoint")
 
+    # (depois do seu bloco preencher_vazio(...))
+
+    df = adicionar_cod_autorizacion_adicionales(df)
+    df = adicionar_tip_doc_adicionales(df)
+
     return df
