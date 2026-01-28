@@ -434,20 +434,80 @@ def error(valor: str) -> str:
 # Reaproveita a lógica de merge com Tasa do DUAS
 from services.duas_utils import adicionar_coluna_tasa  # [2](https://electrolux-my.sharepoint.com/personal/thiago_farias_electrolux_com/Documents/Microsoft%20Copilot%20Chat%20Files/process_pdfs.py)
 
+# services/adicionales_utils.py  (SUBSTITUIR OU ADAPTAR)
+
+import pandas as pd
+import unicodedata
+
+def _norm_text_adic(s: str) -> str:
+    """Remove acentos, upper e strip — robusto para comparar Tipo Doc."""
+    if s is None:
+        return ""
+    s = str(s)
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+    return s.upper().strip()
+
+def _tipo_doc_padrao_adic(valor: str) -> str:
+    """
+    Normaliza variações:
+      FACTURA / INVOICE               -> 'FACTURA'
+      NOTA DE CRÉDITO / CREDIT NOTE   -> 'NOTA_CREDITO'
+    """
+    t = _norm_text_adic(valor)
+    if t in {"FACTURA", "INVOICE"}:
+        return "FACTURA"
+    if t in {
+        "NOTA DE CREDITO",
+        "NOTA CREDITO",
+        "NOTA DE CREDITO ELECTRONICA",
+        "NOTA CREDITO ELECTRONICA",
+        "CREDIT NOTE",
+    }:
+        return "NOTA_CREDITO"
+    return ""
+
 def adicionar_cod_autorizacion_adicionales(df: pd.DataFrame) -> pd.DataFrame:
-    if 'Tipo Doc' in df.columns:
-        df['Tipo de Factura'] = df['Tipo Doc'].apply(
-            lambda x: "01" if str(x).strip().upper() in ("FACTURA", "NOTA DE CRÉDITO", "NOTA DE CREDITO") else None
-        )
+    """
+    ADICIONALES — Idempotente:
+      FACTURA      -> '01'
+      NOTA CRÉDITO -> '07'
+    Preenche apenas onde 'Cód. de Autorización' está vazio.
+    """
+    if "Tipo Doc" not in df.columns:
+        return df
+
+    # garante coluna e normaliza vazios
+    if "Cód. de Autorización" not in df.columns:
+        df["Cód. de Autorización"] = None
+    df["Cód. de Autorización"] = df["Cód. de Autorización"].fillna("").replace("", None)
+
+    tipo_std = df["Tipo Doc"].map(_tipo_doc_padrao_adic)
+    mask_vazio = df["Cód. de Autorización"].isna()
+
+    df.loc[mask_vazio & (tipo_std == "FACTURA"), "Cód. de Autorización"] = "01"
+    df.loc[mask_vazio & (tipo_std == "NOTA_CREDITO"), "Cód. de Autorización"] = "07"
     return df
 
 def adicionar_tip_doc_adicionales(df: pd.DataFrame) -> pd.DataFrame:
-    if 'Tipo Doc' in df.columns:
-        df['Cód. de Autorización'] = df['Tipo Doc'].apply(
-            lambda x: "01" if str(x).strip().upper() == "FACTURA"
-            else "07" if str(x).strip().upper() in ("NOTA DE CRÉDITO", "NOTA DE CREDITO")
-            else None
-        )
+    """
+    ADICIONALES — Idempotente:
+      FACTURA      -> '01'
+      NOTA CRÉDITO -> '01'
+    Preenche apenas onde 'Tipo de Factura' está vazio.
+    """
+    if "Tipo Doc" not in df.columns:
+        return df
+
+    if "Tipo de Factura" not in df.columns:
+        df["Tipo de Factura"] = None
+    df["Tipo de Factura"] = df["Tipo de Factura"].fillna("").replace("", None)
+
+    tipo_std = df["Tipo Doc"].map(_tipo_doc_padrao_adic)
+    mask_vazio = df["Tipo de Factura"].isna()
+
+    df.loc[mask_vazio & (tipo_std == "FACTURA"), "Tipo de Factura"] = "01"
+    df.loc[mask_vazio & (tipo_std == "NOTA_CREDITO"), "Tipo de Factura"] = "01"
     return df
 
 def organizar_colunas_adicionales(df: pd.DataFrame) -> pd.DataFrame:
