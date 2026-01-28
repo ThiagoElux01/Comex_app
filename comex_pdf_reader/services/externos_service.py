@@ -157,6 +157,10 @@ def process_externos_streamlit(
     # 8) Tasa ← Tasa_Sharepoint
     preencher_vazio("Tasa", "Tasa_Sharepoint")
 
+    # ✅ Recalcular códigos agora que "Tipo Doc" pode ter vindo do SharePoint
+    df = adicionar_cod_autorizacion_ext(df)
+    df = adicionar_tip_fac_ext(df)
+
     # =============================
     # Heurística "Lineaabajo"
     # =============================
