@@ -189,49 +189,5 @@ def process_externos_streamlit(
         progress_widget.progress(100, text="Concluído (Externos).")
     if status_widget:
         status_widget.success("Pipeline Externos finalizado.")
-        
-    # ... após o merge com SharePoint:
-    from services.externos_utils import adicionar_pec_sharepoint
-    sharepoint_df = st.session_state.get("sharepoint_df")
-    df_sp = adicionar_pec_sharepoint(df, sharepoint_df)
-    df = df_sp[0] if isinstance(df_sp, tuple) else df_sp
-    
-    # ------------------------------------------
-    # COMPLEMENTAR CAMPOS VAZIOS (EXTERNOS)
-    # ------------------------------------------
-    def preencher_vazio(dest_col, src_col):
-        if dest_col in df.columns and src_col in df.columns:
-            df[dest_col] = df[dest_col].fillna("").replace("", None)
-            df[src_col]  = df[src_col].fillna("").replace("", None)
-            df[dest_col] = df[dest_col].combine_first(df[src_col])
-    
-    # 1) R.U.C ← fornecedor (coluna "proveedor" no SharePoint)
-    preencher_vazio("R.U.C", "proveedor")
-    
-    # 2) Proveedor Iscala ← proveedor (SharePoint)
-    preencher_vazio("Proveedor Iscala", "proveedor")
-    
-    # 2b) (Opcional, recomendável) se ainda vazio, cair para a coluna local "Proveedor" (vinda do parsing do PDF)
-    preencher_vazio("Proveedor Iscala", "Proveedor")
-    
-    # 3) Factura ← numero_de_documento
-    preencher_vazio("Factura", "numero_de_documento")
-    
-    # 4) Tipo Doc ← tipo_doc
-    preencher_vazio("Tipo Doc", "tipo_doc")
-    
-    # 5) Fecha de Emisión ← Fecha_Emision
-    # ATENÇÃO ao nome com acento: sua coluna final é "Fecha de Emisión" (externos) e a origem do SP é "Fecha_Emision".
-    preencher_vazio("Fecha de Emisión", "Fecha_Emision")
-    
-    # 6) Moneda ← moneda
-    preencher_vazio("Moneda", "moneda")
-    
-    # 7) Amount / Op. Gravada ← importe_documento
-    # No Externos sua coluna é "Amount"; em Adicionales era "Op. Gravada".
-    preencher_vazio("Amount", "importe_documento")
-    
-    # 8) Tasa ← Tasa_Sharepoint
-    preencher_vazio("Tasa", "Tasa_Sharepoint")
     
     return df
