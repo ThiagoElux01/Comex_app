@@ -129,4 +129,13 @@ def process_adicionales_streamlit(
     df = adicionar_cod_autorizacion_adicionales(df)
     df = adicionar_tip_doc_adicionales(df)
 
+    
+    # 1) Cod. Moneda a partir de "Moneda" (que pode ter vindo do SharePoint)
+    if "Moneda" in df.columns:
+        df["Cod. Moneda"] = df["Moneda"].apply(codificar_moneda)
+    
+    # 2) Cuenta a partir de "Cod. Moneda" (01 → 421202, 00 → 421201)
+    if "Cod. Moneda" in df.columns:
+        df["Cuenta"] = df["Cod. Moneda"].apply(atribuir_cuenta)
+
     return df
