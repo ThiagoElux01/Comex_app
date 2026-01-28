@@ -25,6 +25,7 @@ from services.externos_utils import (
     op_gravada_negativo_CN_externos,
 )
 
+
 def adicionar_coluna_tasa_externos(df, cambio_df):
     if cambio_df is None or cambio_df.empty or "Fecha de Emisión" not in df.columns:
         return df
@@ -67,9 +68,9 @@ def process_externos_streamlit(
     rows = []
     total = len(uploaded_files)
 
-    # ------------------------------
+    # --------------------------------------------
     # Leitura dos PDFs para DataFrame
-    # ------------------------------
+    # --------------------------------------------
     for i, f in enumerate(uploaded_files, start=1):
         fname = getattr(f, "name", f"arquivo_{i}.pdf")
         text = _extract_text_from_pdf_bytes(f.getvalue())
@@ -78,7 +79,6 @@ def process_externos_streamlit(
         if progress_widget:
             pct = int(i / total * 100)
             progress_widget.progress(pct, text=f"Lendo {fname} ({i}/{total})")
-
         if status_widget:
             status_widget.write(f"📄 Lido: **{fname}**")
 
@@ -121,6 +121,42 @@ def process_externos_streamlit(
     else:
         df = df_sp
 
+    # ------------------------------------------
+    # COMPLEMENTAR CAMPOS VAZIOS (EXTERNOS)
+    # ------------------------------------------
+    def preencher_vazio(dest_col, src_col):
+        if dest_col in df.columns and src_col in df.columns:
+            df[dest_col] = df[dest_col].fillna("").replace("", None)
+            df[src_col] = df[src_col].fillna("").replace("", None)
+            df[dest_col] = df[dest_col].combine_first(df[src_col])
+
+    # 1) R.U.C ← fornecedor (coluna "proveedor" do SharePoint)
+    preencher_vazio("R.U.C", "proveedor")
+
+    # 2) Proveedor Iscala ← proveedor (SharePoint)
+    preencher_vazio("Proveedor Iscala", "proveedor")
+
+    # 2b) fallback adicional: se ainda vazio, usa a coluna local "Proveedor" (detectada do PDF)
+    preencher_vazio("Proveedor Iscala", "Proveedor")
+
+    # 3) Factura ← numero_de_documento
+    preencher_vazio("Factura", "numero_de_documento")
+
+    # 4) Tipo Doc ← tipo_doc
+    preencher_vazio("Tipo Doc", "tipo_doc")
+
+    # 5) Fecha de Emisión ← Fecha_Emision (atenção ao acento no destino)
+    preencher_vazio("Fecha de Emisión", "Fecha_Emision")
+
+    # 6) Moneda ← moneda
+    preencher_vazio("Moneda", "moneda")
+
+    # 7) Amount ← importe_documento
+    preencher_vazio("Amount", "importe_documento")
+
+    # 8) Tasa ← Tasa_Sharepoint
+    preencher_vazio("Tasa", "Tasa_Sharepoint")
+
     # =============================
     # Heurística "Lineaabajo"
     # =============================
@@ -130,27 +166,27 @@ def process_externos_streamlit(
         "CHEST FREEZER": 35,
         "FREEZER": 35,
         "STOVE": 38,
-        "COOKER": 22,            # categoria genérica de cozinha
-        "OVEN": 38,              # genérico; temos também variantes específicas abaixo
+        "COOKER": 22,  # categoria genérica de cozinha
+        "OVEN": 38,  # genérico; temos também variantes específicas abaixo
         "ELECTRIC OVEN": 22,
         "GAS OVEN": 38,
-        "MICROWAVE OVEN": 22,    # mantendo seu valor original (lista tinha 38)
+        "MICROWAVE OVEN": 22,  # mantendo seu valor original (lista tinha 38)
         "WASHING MACHINE": 25,
         "WASHER": 25,
-        "DRYER": 45,             # equivalente a SECADORA
+        "DRYER": 45,  # equivalente a SECADORA
         "SECADORA": 45,
         "VACUUM CLEANER": 10,
         "ROBOTIC VACUUM CLEANERS": 10,
         "STEAM IRON": 34,
-        "GARMENT STEAMER": 24,   # >>> adicionado conforme pedido (24)
+        "GARMENT STEAMER": 24,  # >>> adicionado conforme pedido (24)
         "HANDHELD GARMENT STEAMER": 34,
         "DISHWASHER": 24,
-        "GAS HOB": 38,           # mantendo seu valor original (lista tinha 22)
+        "GAS HOB": 38,  # mantendo seu valor original (lista tinha 22)
         "COOKER HOOD": 22,
         "COCINA": 22,
         "AIR FRYER": 22,
         "SPLIT AIR CONDITIONER": 41,
-        "AIR CONDITIONER": 41,   # >>> adicionado conforme pedido (41)
+        "AIR CONDITIONER": 41,  # >>> adicionado conforme pedido (41)
         "WATER DISPENSER": 22,
         "WINE COOLER": 22,
         "RICE COOKER": 22,
@@ -159,7 +195,6 @@ def process_externos_streamlit(
         "KETTLE": 34,
         "ELECTRICAL COOKING": 22,
         "SPARE PARTS": 34,
-    
         # --- Itens que você já usava e fazem sentido manter ---
         "SEC ELEC": 25,
         "KE4CT": 22,
@@ -189,5 +224,5 @@ def process_externos_streamlit(
         progress_widget.progress(100, text="Concluído (Externos).")
     if status_widget:
         status_widget.success("Pipeline Externos finalizado.")
-    
+
     return df
