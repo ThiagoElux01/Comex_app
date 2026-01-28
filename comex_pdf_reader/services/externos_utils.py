@@ -1048,27 +1048,89 @@ def adicionar_colunas_fixas(df):
     df['Cuenta'] = '421202'
     return df
 
-def adicionar_cod_autorizacion_ext(df):
-    if 'Tipo Doc' in df.columns:
-        df['Cód. de Autorización'] = df['Tipo Doc'].apply(
-            lambda x: "91" if str(x).strip().upper() == "INVOICE"
-            else "97" if str(x).strip().upper() == "CREDIT NOTE"
-            else None
-        )
-    else:
+# --- cole no arquivo services/externos_utils.py, substituindo as duas funções ---
+
+import unicodedata
+import pandas as pd
+
+def _norm_text(s: str) -> str:
+    """
+    Normaliza texto:
+      - remove acentos (NFKD),
+      - upper(),
+      - strip().
+    """
+    if s is None:
+        return ""
+    s = str(s)
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+    return s.upper().strip()
+
+def _tipo_doc_padrao(valor: str) -> str:
+    """
+    Mapeia variações de Tipo Doc para um padrão (INVOICE / CREDIT NOTE).
+    Cobre valores em PT/ES que vêm do SharePoint (FACTURA / NOTA DE CRÉDITO / NOTA CRÉDITO).
+    """
+    t = _norm_text(valor)
+    if t in {"INVOICE", "FACTURA"}:
+        return "INVOICE"
+    if t in {
+        "CREDIT NOTE",
+        "NOTA DE CREDITO",
+        "NOTA CREDITO",
+        "NOTA DE CREDITO ELECTRONICA",
+        "NOTA CREDITO ELECTRONICA",
+    }:
+        return "CREDIT NOTE"
+    return ""
+
+def adicionar_cod_autorizacion_ext(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Preenche Cód. de Autorización conforme Tipo Doc, apenas onde está vazio.
+      - INVOICE / FACTURA     -> 91
+      - CREDIT NOTE / NOTA... -> 97
+    """
+    if "Tipo Doc" not in df.columns:
         print("⚠️ Coluna 'Tipo Doc' não encontrada no DataFrame.")
+        return df
+
+    # garante coluna e normaliza vazios
+    if "Cód. de Autorización" not in df.columns:
+        df["Cód. de Autorización"] = None
+    df["Cód. de Autorización"] = (
+        df["Cód. de Autorización"].fillna("").replace("", None)
+    )
+
+    tipo_std = df["Tipo Doc"].map(_tipo_doc_padrao)
+
+    mask_vazio = df["Cód. de Autorización"].isna()
+    df.loc[mask_vazio & (tipo_std == "INVOICE"), "Cód. de Autorización"] = "91"
+    df.loc[mask_vazio & (tipo_std == "CREDIT NOTE"), "Cód. de Autorización"] = "97"
     return df
 
-def adicionar_tip_fac_ext(df):
-    if 'Tipo Doc' in df.columns:
-        df['Tipo de Factura'] = df['Tipo Doc'].apply(
-            lambda x: "12" if str(x).strip().upper() == "INVOICE"
-            else "12" if str(x).strip().upper() == "CREDIT NOTE"
-            else None
-        )
-    else:
+def adicionar_tip_fac_ext(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Preenche Tipo de Factura conforme Tipo Doc, apenas onde está vazio.
+      - INVOICE / FACTURA     -> 12
+      - CREDIT NOTE / NOTA... -> 12  (sua regra atual)
+    """
+    if "Tipo Doc" not in df.columns:
         print("⚠️ Coluna 'Tipo Doc' não encontrada no DataFrame.")
+        return df
+
+    # garante coluna e normaliza vazios
+    if "Tipo de Factura" not in df.columns:
+        df["Tipo de Factura"] = None
+    df["Tipo de Factura"] = df["Tipo de Factura"].fillna("").replace("", None)
+
+    tipo_std = df["Tipo Doc"].map(_tipo_doc_padrao)
+
+    mask_vazio = df["Tipo de Factura"].isna()
+    df.loc[mask_vazio & (tipo_std == "INVOICE"), "Tipo de Factura"] = "12"
+    df.loc[mask_vazio & (tipo_std == "CREDIT NOTE"), "Tipo de Factura"] = "12"
     return df
+
 
 def remover_duplicatas_source_file(df):
 
