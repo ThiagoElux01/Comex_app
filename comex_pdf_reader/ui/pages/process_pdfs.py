@@ -86,19 +86,83 @@ if not EXTERNOS_AVAILABLE:
 from io import BytesIO
 import pandas as pd
 
-def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Tasa") -> bytes:
+# ui/pages/process_pdfs.py
+from io import BytesIO
+import pandas as pd
+
+def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> bytes:
+    """
+    Exporta DataFrame para XLSX com:
+      - autofit (largura auto-ajustada por conteúdo),
+      - cabeçalho com cor/estilo,
+      - filtro e primeira linha congelada.
+    """
+    from openpyxl import Workbook
+    from openpyxl.utils.dataframe import dataframe_to_rows
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    # 1) Criar workbook/worksheet
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name
+
+    # 2) Escrever o DataFrame (inclui cabeçalho)
+    for r in dataframe_to_rows(df, index=False, header=True):
+        ws.append(r)
+
+    # 3) Estilizar cabeçalho
+    header_fill = PatternFill(start_color="F4B183", end_color="F4B183", fill_type="solid")  # cor do cabeçalho
+    header_font = Font(bold=True, color="000000")  # fonte preta e bold
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin = Side(style="thin", color="D9D9D9")
+    header_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    max_col = ws.max_column
+    max_row = ws.max_row
+
+    for col_idx in range(1, max_col + 1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = header_alignment
+        cell.border = header_border
+
+    # 4) Autofit de largura por coluna
+    base = 1.2   # multiplicador por caractere
+    buffer = 3   # folga extra
+    for col_idx in range(1, max_col + 1):
+        col_letter = get_column_letter(col_idx)
+        max_len = 0
+
+        # considerar cabeçalho
+        header_val = ws.cell(row=1, column=col_idx).value
+        if header_val is not None:
+            max_len = max(max_len, len(str(header_val)))
+
+        # considerar dados
+        for row_idx in range(2, max_row + 1):
+            cell_val = ws.cell(row=row_idx, column=col_idx).value
+            if cell_val is None:
+                continue
+            s_len = len(str(cell_val))
+            if s_len > max_len:
+                max_len = s_len
+
+        min_width = 8
+        width = max(min_width, int(max_len * base) + buffer)
+        ws.column_dimensions[col_letter].width = width
+
+    # 5) Congelar primeira linha e adicionar filtros
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+
+    # 6) Retornar bytes
     buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name=sheet_name)
+    wb.save(buffer)
     buffer.seek(0)
     return buffer.getvalue()
 
-ACTIONS = {
-    "externos": "Externos",
-    "gastos": "Gastos Adicionales",
-    "duas": "Duas",
-    "percepciones": "Percepciones",
-}
 
 def _ensure_state():
     if "acao_selecionada" not in st.session_state:
