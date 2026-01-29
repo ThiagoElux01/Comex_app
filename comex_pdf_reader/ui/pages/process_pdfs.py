@@ -143,6 +143,8 @@ def header_paint(ws):
         "Tasa",
         "Cuenta",
         "Error",
+        "R.U.C",
+        "Op. Gravada",
     }
 
     # Percorre somente a linha 1 (cabeçalho)
