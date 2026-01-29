@@ -116,24 +116,46 @@ def _autofit_worksheet(ws, font_padding: float = 1.2, min_width: float = 8.0, ma
 
 from openpyxl.styles import PatternFill, Font
 
-def _highlight_all_source_file_cells(ws):
+def header_paint(ws):
     """
-    Pinta toda célula cujo valor (string) seja 'source_file'
-    com fundo azul #0077B6 e fonte branca.
+    Pinta o cabeçalho (linha 1) para os nomes informados com:
+    - fundo azul #0077B6 (ARGB FF0077B6)
+    - fonte branca (ARGB FFFFFFFF), em negrito.
+
+    Age apenas na primeira linha (ws[1]).
     """
-    BLUE = "FF0077B6"
+    BLUE = "FF0077B6"   # ARGB (FF = opacidade total)
     WHITE = "FFFFFFFF"
 
     fill_blue = PatternFill(fill_type="solid", start_color=BLUE, end_color=BLUE)
-    font_white = Font(color=WHITE, bold=True)
+    font_white_bold = Font(color=WHITE, bold=True)
 
-    for row in ws.iter_rows():
-        for cell in row:
-            if cell.value is None:
-                continue
-            if str(cell.value).strip().lower() == "source_file":
-                cell.fill = fill_blue
-                cell.font = font_white
+    # Lista de cabeçalhos a pintar (comparação insensível a maiúsculas/minúsculas)
+    headers_to_paint = {
+        "source_file",
+        "proveedor",
+        "proveedor iscala",
+        "factura",
+        "tipo doc",
+        "cód. de autorización",
+        "tipo de factura",
+        "fecha de emisión",
+        "moneda",
+        "cod. moneda",
+        "amount",
+        "tasa",
+        "cuenta",
+        "error",
+    }
+
+    # Percorre apenas o cabeçalho (linha 1)
+    for cell in ws[1]:
+        if cell.value is None:
+            continue
+        header_text = str(cell.value).strip().lower()
+        if header_text in headers_to_paint:
+            cell.fill = fill_blue
+            cell.font = font_white_bold
 
 def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Tasa") -> bytes:
     buffer = BytesIO()
@@ -141,7 +163,7 @@ def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Tasa") -> bytes:
         df.to_excel(writer, index=False, sheet_name=sheet_name)
         ws = writer.book[sheet_name]
         _autofit_worksheet(ws)
-        _highlight_all_source_file_cells(ws)  # <- aqui
+        header_paint(ws)  # <- aqui
     buffer.seek(0)
     return buffer.getvalue()
 
