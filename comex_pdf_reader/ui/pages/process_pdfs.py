@@ -116,32 +116,32 @@ def _autofit_worksheet(ws, font_padding: float = 1.2, min_width: float = 8.0, ma
 
 from openpyxl.styles import PatternFill, Font
 
-def _highlight_source_file(ws):
-    """
-    Pinta as células de azul (#0077b6) com texto branco
-    quando o conteúdo for exatamente 'source_file'.
-    """
-    fill_blue = PatternFill(start_color="0077b6", end_color="0077b6", fill_type="solid")
-    font_white = Font(color="FFFFFF", bold=True)
+from openpyxl.styles import PatternFill, Font
 
-    for row in ws.iter_rows():
-        for cell in row:
-            if str(cell.value).strip().lower() == "source_file":
-                cell.fill = fill_blue
-                cell.font = font_white
+def _highlight_header_source_file(ws):
+    """
+    Pinta o cabeçalho 'source_file' de azul (#0077B6) e fonte branca.
+    Procura apenas na primeira linha (cabeçalho).
+    """
+    BLUE = "FF0077B6"  # ARGB: FF + 0077B6
+    WHITE = "FFFFFFFF"
+
+    fill_blue = PatternFill(fill_type="solid", start_color=BLUE, end_color=BLUE)
+    font_white = Font(color=WHITE, bold=True)
+
+    for cell in ws[1]:  # primeira linha inteira (cabeçalho)
+        if str(cell.value).strip().lower() == "source_file":
+            cell.fill = fill_blue
+            cell.font = font_white
+            break  # achou, pode sair
 
 def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Tasa") -> bytes:
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name=sheet_name)
         ws = writer.book[sheet_name]
-
-        # aplica autofit
         _autofit_worksheet(ws)
-
-        # aplica destaque para 'source_file'
-        _highlight_source_file(ws)
-
+        _highlight_header_source_file(ws)  # <- aqui
     buffer.seek(0)
     return buffer.getvalue()
 
