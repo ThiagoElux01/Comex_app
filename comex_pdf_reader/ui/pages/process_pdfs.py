@@ -86,10 +86,43 @@ if not EXTERNOS_AVAILABLE:
 from io import BytesIO
 import pandas as pd
 
+from io import BytesIO
+import pandas as pd
+from openpyxl.utils import get_column_letter
+
+def _autofit_worksheet(ws, font_padding: float = 1.2, min_width: float = 8.0, max_width: float = 60.0):
+    """
+    Ajusta a largura das colunas de uma planilha openpyxl com base no maior texto
+    (entre cabeçalho e células). 
+    - font_padding: fator de folga para não cortar texto
+    - min_width/max_width: limites de largura
+    """
+    for col_idx, col in enumerate(ws.iter_cols(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column), start=1):
+        header = col[0].value if col and col[0] is not None else ""
+        max_len = len(str(header)) if header is not None else 0
+
+        for cell in col[1:]:  # ignora cabeçalho já considerado
+            val = cell.value
+            if val is None:
+                continue
+            # Converte para string sem notação científica (para números longos)
+            if isinstance(val, float):
+                # Representação compacta, mas legível
+                text = f"{val:.6g}"
+            else:
+                text = str(val)
+            max_len = max(max_len, len(text))
+
+        # Ajuste final de largura com padding e limites
+        width = min(max(max_len * font_padding, min_width), max_width)
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
 def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Tasa") -> bytes:
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name=sheet_name)
+        ws = writer.book[sheet_name]
+        _autofit_worksheet(ws)
     buffer.seek(0)
     return buffer.getvalue()
 
@@ -444,13 +477,16 @@ def render():
                         mime="text/csv",
                         use_container_width=True
                     )
-    
-                with col_xlsx:
+
+                    with col_xlsx:
                     buffer = BytesIO()
                     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
                         df_all.to_excel(writer, index=False, sheet_name="SharePoint")
+                        # 👇 pega a aba recém criada e aplica autofit
+                        ws = writer.book["SharePoint"]
+                        _autofit_worksheet(ws)
                     buffer.seek(0)
-    
+                
                     st.download_button(
                         label="Baixar XLSX (SharePoint)",
                         data=buffer,
@@ -458,7 +494,6 @@ def render():
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
-    
             except ValueError:
                 st.error("❌ A aba 'all' não foi encontrada no arquivo Excel.")
             except Exception as e:
