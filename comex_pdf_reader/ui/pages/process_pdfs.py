@@ -118,11 +118,8 @@ from openpyxl.styles import PatternFill, Font
 
 def header_paint(ws):
     """
-    Pinta o cabeçalho (linha 1) para os nomes informados com:
-    - fundo azul #0077B6 (ARGB FF0077B6)
-    - fonte branca (ARGB FFFFFFFF), em negrito.
-
-    Age apenas na primeira linha (ws[1]).
+    Pinta o cabeçalho (linha 1) apenas quando o texto for
+    exatamente igual (case-sensitive) a um dos nomes definidos.
     """
     BLUE = "FF0077B6"   # ARGB (FF = opacidade total)
     WHITE = "FFFFFFFF"
@@ -130,30 +127,30 @@ def header_paint(ws):
     fill_blue = PatternFill(fill_type="solid", start_color=BLUE, end_color=BLUE)
     font_white_bold = Font(color=WHITE, bold=True)
 
-    # Lista de cabeçalhos a pintar (comparação insensível a maiúsculas/minúsculas)
-    headers_to_paint = {
+    # Lista EXATA (case-sensitive). Só estes serão pintados.
+    exact_headers = {
         "source_file",
-        "proveedor",
-        "proveedor iscala",
-        "factura",
-        "tipo doc",
-        "cód. de autorización",
-        "tipo de factura",
-        "fecha de emisión",
-        "moneda",
-        "cod. moneda",
-        "amount",
-        "tasa",
-        "cuenta",
-        "error",
+        "Proveedor",
+        "Proveedor Iscala",
+        "Factura",
+        "Tipo Doc",
+        "Cód. de Autorización",
+        "Tipo de Factura",
+        "Fecha de Emisión",
+        "Moneda",
+        "Cod. Moneda",
+        "Amount",
+        "Tasa",
+        "Cuenta",
+        "Error",
     }
 
-    # Percorre apenas o cabeçalho (linha 1)
+    # Percorre somente a linha 1 (cabeçalho)
     for cell in ws[1]:
         if cell.value is None:
             continue
-        header_text = str(cell.value).strip().lower()
-        if header_text in headers_to_paint:
+        header_text = str(cell.value).strip()  # sem lower(), comparação exata
+        if header_text in exact_headers:
             cell.fill = fill_blue
             cell.font = font_white_bold
 
