@@ -1,10 +1,7 @@
-
 # ui/pages/process_pdfs.py
 import streamlit as st
 from services import pdf_service
 from services.tasa_service import atualizar_dataframe_tasa
-
-
 
 # --- NOVO: Import protegido do Adicionales ---
 ADICIONALES_AVAILABLE = True
@@ -86,41 +83,43 @@ if not EXTERNOS_AVAILABLE:
 from io import BytesIO
 import pandas as pd
 
-from io import BytesIO
-import pandas as pd
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# INCLUSÃO: utilitário para ajustar largura ("autofit") das colunas no Excel
 from openpyxl.utils import get_column_letter
 
 def _autofit_worksheet(ws, font_padding: float = 1.2, min_width: float = 8.0, max_width: float = 60.0):
     """
     Ajusta a largura das colunas de uma planilha openpyxl com base no maior texto
-    (entre cabeçalho e células). 
-    - font_padding: fator de folga para não cortar texto
-    - min_width/max_width: limites de largura
+    (entre cabeçalho e células). Não existe AutoFit nativo no openpyxl; esta é uma estimativa.
     """
-    for col_idx, col in enumerate(ws.iter_cols(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column), start=1):
+    if ws.max_column is None or ws.max_row is None:
+        return
+
+    for col_idx, col in enumerate(
+        ws.iter_cols(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column),
+        start=1
+    ):
         header = col[0].value if col and col[0] is not None else ""
         max_len = len(str(header)) if header is not None else 0
 
-        for cell in col[1:]:  # ignora cabeçalho já considerado
+        for cell in col[1:]:  # ignora o cabeçalho já contabilizado
             val = cell.value
             if val is None:
                 continue
-            # Converte para string sem notação científica (para números longos)
-            if isinstance(val, float):
-                # Representação compacta, mas legível
-                text = f"{val:.6g}"
-            else:
-                text = str(val)
+            # Representação razoável para floats (evita notação científica gigante)
+            text = f"{val:.6g}" if isinstance(val, float) else str(val)
             max_len = max(max_len, len(text))
 
-        # Ajuste final de largura com padding e limites
         width = min(max(max_len * font_padding, min_width), max_width)
         ws.column_dimensions[get_column_letter(col_idx)].width = width
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
 
 def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Tasa") -> bytes:
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name=sheet_name)
+        # INCLUSÃO: aplica autofit na aba criada
         ws = writer.book[sheet_name]
         _autofit_worksheet(ws)
     buffer.seek(0)
@@ -152,13 +151,11 @@ def render():
     _ensure_state()
     st.subheader("Processar PDFs")
 
-    
     tab1, tab2, tab3 = st.tabs([
         "📥 Processamento local",
         "🌐 Tasa SUNAT",
         "📁 Arquivo Sharepoint"
     ])
-
 
     # -------------------------
     # 📥 Processamento local
@@ -342,7 +339,6 @@ def render():
                         else:
                             st.warning("Nenhuma informação válida encontrada nos PDFs para Externos.")
 
-
                 elif acao == "gastos":
                     if not ADICIONALES_AVAILABLE:
                         st.error("Gastos Adicionales indisponível: confira dependências e `services/adicionales_service.py`.")
@@ -477,16 +473,16 @@ def render():
                         mime="text/csv",
                         use_container_width=True
                     )
-
-                    with col_xlsx:
+    
+                with col_xlsx:
                     buffer = BytesIO()
                     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
                         df_all.to_excel(writer, index=False, sheet_name="SharePoint")
-                        # 👇 pega a aba recém criada e aplica autofit
+                        # INCLUSÃO: aplica autofit na aba SharePoint
                         ws = writer.book["SharePoint"]
                         _autofit_worksheet(ws)
                     buffer.seek(0)
-                
+    
                     st.download_button(
                         label="Baixar XLSX (SharePoint)",
                         data=buffer,
@@ -494,9 +490,9 @@ def render():
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
+    
             except ValueError:
                 st.error("❌ A aba 'all' não foi encontrada no arquivo Excel.")
             except Exception as e:
                 st.error("❌ Erro ao processar o arquivo Excel.")
                 st.exception(e)
-
