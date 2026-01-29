@@ -86,10 +86,6 @@ if not EXTERNOS_AVAILABLE:
 from io import BytesIO
 import pandas as pd
 
-# ui/pages/process_pdfs.py
-from io import BytesIO
-import pandas as pd
-
 def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Tasa") -> bytes:
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -103,7 +99,6 @@ ACTIONS = {
     "duas": "Duas",
     "percepciones": "Percepciones",
 }
-
 
 def _ensure_state():
     if "acao_selecionada" not in st.session_state:
@@ -469,4 +464,3 @@ def render():
             except Exception as e:
                 st.error("❌ Erro ao processar o arquivo Excel.")
                 st.exception(e)
-
