@@ -133,19 +133,19 @@ def header_paint(ws):
     # Lista de cabeçalhos a pintar (comparação insensível a maiúsculas/minúsculas)
     headers_to_paint = {
         "source_file",
-        "R.U.C",
-        "Proveedor Iscala",
-        "Factura",
-        "Tipo Doc",
-        "Cód. de Autorización",
-        "Tipo de Factura",
-        "Fecha de Emisión",
-        "Moneda",
-        "Cod. Moneda",
-        "Op. Gravada",
-        "Tasa",
-        "Cuenta",
-        "Error",
+        "proveedor",
+        "proveedor iscala",
+        "factura",
+        "tipo doc",
+        "cód. de autorización",
+        "tipo de factura",
+        "fecha de emisión",
+        "moneda",
+        "cod. moneda",
+        "amount",
+        "tasa",
+        "cuenta",
+        "error",
     }
 
     # Percorre apenas o cabeçalho (linha 1)
