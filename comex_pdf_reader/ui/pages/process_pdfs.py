@@ -155,6 +155,11 @@ def header_paint(ws):
         "Percepcion",
         "PEC",
         "COD Moneda",
+        "Source_File",
+        "No_Liquidacion",
+        "CDA",
+        "Monto",
+        "COD MONEDA",
     }
 
     # Percorre somente a linha 1 (cabeçalho)
