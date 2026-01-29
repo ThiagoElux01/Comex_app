@@ -145,6 +145,16 @@ def header_paint(ws):
         "Error",
         "R.U.C",
         "Op. Gravada",
+        "COD PROVEEDOR",
+        "Declaracion",
+        "Fecha",
+        "Ad_Valorem",
+        "Imp_Prom_Municipal",
+        "Imp_Gene_a_las_Ventas",
+        "IGV",
+        "Percepcion",
+        "PEC",
+        "COD Moneda",
     }
 
     # Percorre somente a linha 1 (cabeçalho)
