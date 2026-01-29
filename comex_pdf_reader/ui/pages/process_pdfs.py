@@ -114,14 +114,34 @@ def _autofit_worksheet(ws, font_padding: float = 1.2, min_width: float = 8.0, ma
         ws.column_dimensions[get_column_letter(col_idx)].width = width
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
+from openpyxl.styles import PatternFill, Font
+
+def _highlight_source_file(ws):
+    """
+    Pinta as células de azul (#0077b6) com texto branco
+    quando o conteúdo for exatamente 'source_file'.
+    """
+    fill_blue = PatternFill(start_color="0077b6", end_color="0077b6", fill_type="solid")
+    font_white = Font(color="FFFFFF", bold=True)
+
+    for row in ws.iter_rows():
+        for cell in row:
+            if str(cell.value).strip().lower() == "source_file":
+                cell.fill = fill_blue
+                cell.font = font_white
 
 def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Tasa") -> bytes:
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name=sheet_name)
-        # INCLUSÃO: aplica autofit na aba criada
         ws = writer.book[sheet_name]
+
+        # aplica autofit
         _autofit_worksheet(ws)
+
+        # aplica destaque para 'source_file'
+        _highlight_source_file(ws)
+
     buffer.seek(0)
     return buffer.getvalue()
 
