@@ -6,7 +6,7 @@ import pandas as pd
 
 # Reaproveita helper de exportação XLSX da Aplicación Comex
 # (definido em ui/pages/process_pdfs.py)
-from ui.pages.process_pdfs import to_xlsx_bytes  # mesmo padrão de exportação (autofit/estilo)  # [1](https://electrolux-my.sharepoint.com/personal/thiago_farias_electrolux_com/Documents/Microsoft%20Copilot%20Chat%20Files/home.py)
+from ui.pages.process_pdfs import to_xlsx_bytes  # mesmo padrão de exportação (autofit/estilo)
 
 # ------------------------------------------------------------
 # Estado e helpers
@@ -157,7 +157,7 @@ def render():
                 pbar.progress(35, text="Convertendo para DataFrame...")
                 df = parse_estado_cuenta_txt(text)
 
-                # ======== LINHA TOTAL (sem conflitos de tipo) ========
+                # ======== LINHA TOTAL ========
                 if df is not None and not df.empty:
                     numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
 
@@ -168,38 +168,52 @@ def render():
                     # 2) Soma com numpy (ignora NaN)
                     totals_dict = {c: float(np.nansum(df[c].values)) for c in numeric_cols}
 
-                    # 3) Cria a linha TOTAL
+                    # 3) Cria a linha TOTAL (como floats ainda)
                     total_row = {col: "" for col in df.columns}
                     total_row["Descripción"] = "TOTAL"
                     for c in numeric_cols:
-                        total_row[c] = round(totals_dict[c], 2)
+                        total_row[c] = totals_dict[c]
 
                     # 4) Concatena a linha TOTAL
                     df = pd.concat([df, pd.DataFrame([total_row], columns=df.columns)], ignore_index=True)
-                # ======== FIM LINHA TOTAL ========
+
+                # ======== FORMATAÇÃO 111,111,111.00 (display + downloads) ========
+                def _fmt(v):
+                    if pd.isna(v) or v == "":
+                        return ""
+                    try:
+                        return f"{float(v):,.2f}"
+                    except Exception:
+                        return str(v)
+
+                df_fmt = df.copy()
+                if df_fmt is not None and not df_fmt.empty:
+                    for c in ["Sal OB", "Saldo OB", "Período", "Saldo CB"]:
+                        df_fmt[c] = df_fmt[c].apply(_fmt)
+                # ======== FIM DA FORMATAÇÃO ========
 
                 pbar.progress(70, text="Preparando visualização...")
-                if df is None or df.empty:
+                if df_fmt is None or df_fmt.empty:
                     st.warning("Nenhuma linha válida encontrada no arquivo.")
                     pbar.progress(0, text="Aguardando...")
                     return
 
                 st.success("Arquivo processado com sucesso.")
-                st.dataframe(df, use_container_width=True, height=550)
+                st.dataframe(df_fmt, use_container_width=True, height=550)
 
                 pbar.progress(90, text="Gerando arquivos para download...")
-                # Downloads
+                # Downloads (usam o DataFrame formatado para manter 111,111,111.00)
                 col_csv, col_xlsx = st.columns(2)
                 with col_csv:
                     st.download_button(
                         label="Baixar CSV (Estado de Cuenta)",
-                        data=df.to_csv(index=False).encode("utf-8"),
+                        data=df_fmt.to_csv(index=False).encode("utf-8"),
                         file_name="estado_de_cuenta.csv",
                         mime="text/csv",
                         use_container_width=True,
                     )
                 with col_xlsx:
-                    xlsx_bytes = to_xlsx_bytes(df, sheet_name="EstadoCuenta")
+                    xlsx_bytes = to_xlsx_bytes(df_fmt, sheet_name="EstadoCuenta")
                     st.download_button(
                         label="Baixar XLSX (Estado de Cuenta)",
                         data=xlsx_bytes,
