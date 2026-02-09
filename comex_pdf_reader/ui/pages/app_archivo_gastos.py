@@ -6,7 +6,7 @@ import pandas as pd
 
 # Reaproveita helper de exportação XLSX da Aplicación Comex
 # (definido em ui/pages/process_pdfs.py)
-from ui.pages.process_pdfs import to_xlsx_bytes  # ← mesmo padrão de exportação (autofit/estilo) [2](https://electrolux-my.sharepoint.com/personal/thiago_farias_electrolux_com/Documents/Microsoft%20Copilot%20Chat%20Files/home.py)
+from ui.pages.process_pdfs import to_xlsx_bytes  # mesmo padrão de exportação (autofit/estilo)
 
 # ------------------------------------------------------------
 # Estado e helpers
@@ -157,18 +157,27 @@ def render():
                 pbar.progress(35, text="Convertendo para DataFrame...")
                 df = parse_estado_cuenta_txt(text)
 
-                # ======== NOVO: adiciona linha de totais no final ========
-                numeric_cols = df.select_dtypes(include="number").columns
-                totals_row = {col: df[col].sum(skipna=True) for col in numeric_cols}
-                # Preenche colunas não numéricas
-                for col in df.columns:
-                    if col not in totals_row:
-                        totals_row[col] = ""
-                totals_row["Descripción"] = "TOTAL"
-                # Concatena e (opcional) arredonda
-                df = pd.concat([df, pd.DataFrame([totals_row], columns=df.columns)], ignore_index=True)
-                df[numeric_cols] = df[numeric_cols].round(2)
-                # ======== FIM DO BLOCO NOVO ========
+                # ======== AJUSTE: adiciona linha de totais no final ========
+                if df is not None and not df.empty:
+                    # 1) Garante que as colunas numéricas são float
+                    numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
+                    for c in numeric_cols:
+                        df[c] = pd.to_numeric(df[c], errors="coerce")
+
+                    # 2) (Opcional) adiciona uma linha em branco antes do TOTAL (visual)
+                    blank_row = {col: "" for col in df.columns}
+                    df = pd.concat([df, pd.DataFrame([blank_row], columns=df.columns)], ignore_index=True)
+
+                    # 3) Calcula o TOTAL
+                    totals_row = {col: "" for col in df.columns}
+                    totals_row["Descripción"] = "TOTAL"
+                    for c in numeric_cols:
+                        totals_row[c] = float(df[c].sum(skipna=True))
+
+                    # 4) Concatena o TOTAL e arredonda
+                    df = pd.concat([df, pd.DataFrame([totals_row], columns=df.columns)], ignore_index=True)
+                    df[numeric_cols] = df[numeric_cols].round(2)
+                # ======== FIM DO AJUSTE ========
 
                 pbar.progress(70, text="Preparando visualização...")
                 if df is None or df.empty:
@@ -191,7 +200,7 @@ def render():
                         use_container_width=True,
                     )
                 with col_xlsx:
-                    xlsx_bytes = to_xlsx_bytes(df, sheet_name="EstadoCuenta")  # helper da Aplicación Comex [2](https://electrolux-my.sharepoint.com/personal/thiago_farias_electrolux_com/Documents/Microsoft%20Copilot%20Chat%20Files/home.py)
+                    xlsx_bytes = to_xlsx_bytes(df, sheet_name="EstadoCuenta")
                     st.download_button(
                         label="Baixar XLSX (Estado de Cuenta)",
                         data=xlsx_bytes,
