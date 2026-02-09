@@ -5,6 +5,7 @@ from ui.layout import app_header, sidebar_navigation
 from settings import PAGES
 from ui.pages import home, process_pdfs, settings_page
 from ui.pages import downloads_page
+from ui.pages import app_archivo_gastos
 
 def main():
     st.set_page_config(page_title="COMEX PDF READER", page_icon="📄", layout="wide")
@@ -27,6 +28,8 @@ def main():
         home.render()
     elif page == "Aplicación Comex":
         process_pdfs.render()
+    elif page == "Aplicación Archivo Gastos":   # <--- NOVO
+        app_archivo_gastos.render()             # <--- NOVO
     elif page == "Configurações":
         settings_page.render()
     else:
