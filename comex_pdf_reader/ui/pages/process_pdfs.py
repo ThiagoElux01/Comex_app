@@ -206,7 +206,7 @@ def _select_action(action_key: str):
 # -----------------------------
 def render():
     _ensure_state()
-    st.subheader("Processar PDFs")
+    st.subheader("Aplicación Comex")
 
     tab1, tab2, tab3, tab4= st.tabs([
         "📥 Processamento local",
