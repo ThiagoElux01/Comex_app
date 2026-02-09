@@ -25,7 +25,7 @@ def main():
     # 4) roteamento
     if page == "Home":
         home.render()
-    elif page == "Processar PDFs":
+    elif page == "Aplicación Comex":
         process_pdfs.render()
     elif page == "Configurações":
         settings_page.render()
