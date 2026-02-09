@@ -1,13 +1,12 @@
 # ui/pages/app_archivo_gastos.py
 import re
-from io import BytesIO
 import numpy as np
 import streamlit as st
 import pandas as pd
 
 # Reaproveita helper de exportação XLSX da Aplicación Comex
 # (definido em ui/pages/process_pdfs.py)
-from ui.pages.process_pdfs import to_xlsx_bytes  # mesmo padrão de exportação (autofit/estilo)  [1](https://electrolux-my.sharepoint.com/personal/thiago_farias_electrolux_com/Documents/Microsoft%20Copilot%20Chat%20Files/home.py)
+from ui.pages.process_pdfs import to_xlsx_bytes  # mesmo padrão de exportação (autofit/estilo)  # [1](https://electrolux-my.sharepoint.com/personal/thiago_farias_electrolux_com/Documents/Microsoft%20Copilot%20Chat%20Files/home.py)
 
 # ------------------------------------------------------------
 # Estado e helpers
@@ -123,7 +122,7 @@ def render():
     st.divider()
 
     # --------------------------------------------------------
-    # Modo: Estado de Cuenta  (ativo agora)
+    # Modo: Estado de Cuenta
     # --------------------------------------------------------
     if mode == "estado":
         st.caption("Carregue o arquivo **.txt** de *Listado de Saldos* para visualização e export.")
@@ -158,27 +157,26 @@ def render():
                 pbar.progress(35, text="Convertendo para DataFrame...")
                 df = parse_estado_cuenta_txt(text)
 
-                # ======== AJUSTE FINAL: linha TOTAL sem conflitar tipos ========
+                # ======== LINHA TOTAL (sem conflitos de tipo) ========
                 if df is not None and not df.empty:
                     numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
+
                     # 1) Garante float nas colunas numéricas
                     for c in numeric_cols:
                         df[c] = pd.to_numeric(df[c], errors="coerce")
 
-                    # 2) Calcula o TOTAL antes de inserir qualquer linha extra
-                    totals = df[numeric_cols].sum(skipna=True)
+                    # 2) Soma com numpy (ignora NaN)
+                    totals_dict = {c: float(np.nansum(df[c].values)) for c in numeric_cols}
 
-                    # 3) (Opcional) Espaçador visual com NaN (não quebra dtype)
-                    spacer = {col: (np.nan if col in numeric_cols else "") for col in df.columns}
-
-                    # 4) Linha TOTAL
-                    total_row = {col: (totals[col] if col in numeric_cols else "") for col in df.columns}
+                    # 3) Cria a linha TOTAL
+                    total_row = {col: "" for col in df.columns}
                     total_row["Descripción"] = "TOTAL"
+                    for c in numeric_cols:
+                        total_row[c] = round(totals_dict[c], 2)
 
-                    # 5) Concatena (dados + spacer + total) e arredonda numéricos
-                    df = pd.concat([df, pd.DataFrame([spacer, total_row])], ignore_index=True)
-                    df[numeric_cols] = df[numeric_cols].round(2)
-                # ======== FIM DO AJUSTE FINAL ========
+                    # 4) Concatena a linha TOTAL
+                    df = pd.concat([df, pd.DataFrame([total_row], columns=df.columns)], ignore_index=True)
+                # ======== FIM LINHA TOTAL ========
 
                 pbar.progress(70, text="Preparando visualização...")
                 if df is None or df.empty:
