@@ -2,6 +2,7 @@
 import streamlit as st
 from services import pdf_service
 from services.tasa_service import atualizar_dataframe_tasa
+from ui.pages import downloads_page
 
 # --- NOVO: Import protegido do Adicionales ---
 ADICIONALES_AVAILABLE = True
@@ -210,7 +211,8 @@ def render():
     tab1, tab2, tab3 = st.tabs([
         "📥 Processamento local",
         "🌐 Tasa SUNAT",
-        "📁 Arquivo Sharepoint"
+        "📁 Arquivo Sharepoint",
+        "📦 Arquivos modelo"
     ])
 
     # -------------------------
@@ -552,3 +554,8 @@ def render():
             except Exception as e:
                 st.error("❌ Erro ao processar o arquivo Excel.")
                 st.exception(e)
+
+
+    with tab4:
+        downloads_page.render()
+
