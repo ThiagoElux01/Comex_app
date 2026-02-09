@@ -1,7 +1,12 @@
 # ui/pages/app_archivo_gastos.py
+import re
+from io import BytesIO
 import streamlit as st
 import pandas as pd
-from io import BytesIO
+
+# Reaproveita helper de exportação XLSX da Aplicación Comex
+# (definido em ui/pages/process_pdfs.py)
+from ui.pages.process_pdfs import to_xlsx_bytes  # ← reutiliza o mesmo padrão de exportação (autofit/estilo)
 
 # ------------------------------------------------------------
 # Estado e helpers
@@ -10,100 +15,187 @@ def _ensure_state():
     if "aag_state" not in st.session_state:
         st.session_state["aag_state"] = {
             "uploader_key": "aag_uploader_1",
-            "last_action": None,
+            "last_action": None,      # "estado" | "plantilla" | "asientos"
         }
+    if "aag_mode" not in st.session_state:
+        st.session_state["aag_mode"] = "estado"  # default na primeira carga
 
-def _set_action(action: str):
-    st.session_state["aag_state"]["last_action"] = action
+def _set_mode(mode: str):
+    st.session_state["aag_mode"] = mode
+
+# ------------------------------------------------------------
+# Parsers
+# ------------------------------------------------------------
+_NUM = r"(-?\d[\d,]*\.\d{2}-?)"   # número com milhares e 2 decimais; pode terminar com '-' (negativo)
+
+def _clean_num(s: str) -> float | None:
+    """
+    Converte strings como '12,345.67-' em float (negativo).
+    """
+    if s is None:
+        return None
+    s = str(s).strip()
+    if s == "":
+        return None
+    neg = s.endswith("-")
+    s = s[:-1] if neg else s
+    s = s.replace(",", "")
+    try:
+        v = float(s)
+        return -v if neg else v
+    except Exception:
+        return None
+
+def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
+    """
+    Lê um relatório 'Listado de Saldos' em texto e retorna um DataFrame com:
+    ['CTA','Descripción','Sal OB','Saldo OB','Período','Saldo CB']
+    """
+    linhas = texto.splitlines()
+
+    # Encontrar início após o cabeçalho (linha que contém "CTA Descripción")
+    start_idx = 0
+    for i, ln in enumerate(linhas):
+        if "CTA" in ln and "Descripción" in ln:
+            start_idx = i + 1
+            break
+
+    dados = []
+    tail_re = re.compile(rf"\s*{_NUM}\s+{_NUM}\s+{_NUM}\s+{_NUM}\s*$")
+
+    for ln in linhas[start_idx:]:
+        raw = ln.rstrip()
+        if not raw:
+            continue
+        # Ignora separadores e cabeçalho/rodapé
+        if set(raw.strip()) in [{"="}, {"-"}] or "Scala" in raw or "Electrolux" in raw:
+            continue
+
+        m = tail_re.search(raw)
+        if not m:
+            continue
+
+        # Parte à esquerda dos 4 números
+        left = raw[:m.start()].rstrip()
+        if not left:
+            continue
+
+        # CTA = primeiro token; Descripción = resto
+        parts = left.split()
+        cta = parts[0] if parts else ""
+        descr = left[len(cta):].strip() if parts else left.strip()
+
+        # Extrai e normaliza números
+        sal_ob, saldo_ob, periodo, saldo_cb = ( _clean_num(x) for x in m.groups() )
+
+        dados.append([cta, descr, sal_ob, saldo_ob, periodo, saldo_cb])
+
+    cols = ["CTA", "Descripción", "Sal OB", "Saldo OB", "Período", "Saldo CB"]
+    df = pd.DataFrame(dados, columns=cols)
+
+    # Tipos numéricos garantidos (caso algo tenha escapado)
+    for c in ["Sal OB", "Saldo OB", "Período", "Saldo CB"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    return df
 
 # ------------------------------------------------------------
 # Página
 # ------------------------------------------------------------
 def render():
     _ensure_state()
-
-    # Título da página
     st.subheader("Aplicación Archivo Gastos")
 
-    # Descrição breve
-    st.caption(
-        "Espaço para processar/validar o **Arquivo de Gastos**. "
-        "Nas próximas etapas, conectaremos as regras de negócio e exportações."
-    )
+    # Botões principais
+    col_b1, col_b2, col_b3 = st.columns(3)
+    with col_b1:
+        if st.button("Estado de Cuenta", use_container_width=True):
+            _set_mode("estado")
+    with col_b2:
+        if st.button("Plantilla Gastos", use_container_width=True):
+            _set_mode("plantilla")
+    with col_b3:
+        if st.button("Asientos", use_container_width=True):
+            _set_mode("asientos")
 
-    # --------------------------------------------------------
-    # Seção de parâmetros (ex.: filtros, ano/mês, options etc.)
-    # --------------------------------------------------------
-    with st.expander("Parâmetros (opcional)", expanded=False):
-        colp1, colp2, colp3 = st.columns(3)
-        with colp1:
-            ano = st.selectbox("Ano", ["2024", "2025", "2026"], index=1)
-        with colp2:
-            mes = st.selectbox("Mês", list(range(1, 13)), index=0)
-        with colp3:
-            modo = st.radio("Modo de execução", ["Validação", "Consolidação"], index=0)
-
+    mode = st.session_state["aag_mode"]
     st.divider()
 
     # --------------------------------------------------------
-    # Uploader (se a página for trabalhar com arquivos locais)
+    # Modo: Estado de Cuenta  (ativo agora)
     # --------------------------------------------------------
-    uploaded = st.file_uploader(
-        "Carregar arquivo(s) de gastos",
-        type=["xlsx", "xls", "csv", "txt", "pdf"],
-        accept_multiple_files=True,
-        key=st.session_state["aag_state"]["uploader_key"],
-        help="Envie um ou mais arquivos conforme o fluxo do Arquivo de Gastos."
-    )
+    if mode == "estado":
+        st.caption("Carregue o arquivo **.txt** de *Listado de Saldos* para visualização e export.")
+        uploaded = st.file_uploader(
+            "Selecionar arquivo (.txt)",
+            type=["txt"],
+            accept_multiple_files=False,
+            key=st.session_state["aag_state"]["uploader_key"],
+            help="Ex.: relatório 'Listado de Saldos' exportado do sistema."
+        )
 
-    # Botões de ação
-    col_run, col_clear = st.columns([2, 1])
-    with col_run:
-        run_clicked = st.button("▶️ Executar", type="primary", use_container_width=True, disabled=not uploaded)
-    with col_clear:
-        clear_clicked = st.button("Limpar", use_container_width=True)
+        col_run, col_clear = st.columns([2, 1])
+        with col_run:
+            run_clicked = st.button("▶️ Executar", type="primary", use_container_width=True, disabled=(uploaded is None))
+        with col_clear:
+            clear_clicked = st.button("Limpar", use_container_width=True)
 
-    if clear_clicked:
-        # Limpa seleção e reseta key do uploader
-        st.session_state["aag_state"]["last_action"] = None
-        st.session_state["aag_state"]["uploader_key"] = st.session_state["aag_state"]["uploader_key"] + "_x"
-        st.rerun()
+        if clear_clicked:
+            st.session_state["aag_state"]["uploader_key"] = st.session_state["aag_state"]["uploader_key"] + "_x"
+            st.rerun()
+
+        if run_clicked and uploaded is not None:
+            pbar = st.progress(0, text="Lendo arquivo .txt...")
+            try:
+                raw_bytes = uploaded.getvalue()
+                # Decodificação robusta (primeiro UTF-8, se falhar cai para Latin-1)
+                try:
+                    text = raw_bytes.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = raw_bytes.decode("latin-1")
+
+                pbar.progress(35, text="Convertendo para DataFrame...")
+                df = parse_estado_cuenta_txt(text)
+
+                pbar.progress(70, text="Preparando visualização...")
+                if df is None or df.empty:
+                    st.warning("Nenhuma linha válida encontrada no arquivo.")
+                    pbar.progress(0, text="Aguardando...")
+                    return
+
+                st.success("Arquivo processado com sucesso.")
+                st.dataframe(df, use_container_width=True, height=550)
+
+                pbar.progress(90, text="Gerando arquivos para download...")
+                # Downloads
+                col_csv, col_xlsx = st.columns(2)
+                with col_csv:
+                    st.download_button(
+                        label="Baixar CSV (Estado de Cuenta)",
+                        data=df.to_csv(index=False).encode("utf-8"),
+                        file_name="estado_de_cuenta.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+                with col_xlsx:
+                    xlsx_bytes = to_xlsx_bytes(df, sheet_name="EstadoCuenta")  # helper da Aplicación Comex
+                    st.download_button(
+                        label="Baixar XLSX (Estado de Cuenta)",
+                        data=xlsx_bytes,
+                        file_name="estado_de_cuenta.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                    )
+                pbar.progress(100, text="Concluído.")
+
+            except Exception as e:
+                st.error("Erro ao processar o arquivo .txt.")
+                st.exception(e)
 
     # --------------------------------------------------------
-    # Resultado (placeholder) - aqui entra seu pipeline real
+    # Placeholders para os demais (prontos para receber lógica)
     # --------------------------------------------------------
-    if run_clicked and uploaded:
-        status = st.empty()
-        pbar = st.progress(0, text="Iniciando processamento...")
-
-        try:
-            # Exemplo mínimo: apenas lista nomes
-            nomes = [getattr(f, "name", "arquivo") for f in uploaded]
-            df_preview = pd.DataFrame({"Arquivos recebidos": nomes})
-            pbar.progress(50, text="Lendo estrutura...")
-
-            # TODO: Conectar seu pipeline real aqui
-            # TODO: Normalizações, merges, cálculos, export...
-
-            pbar.progress(100, text="Concluído.")
-            st.success("Processamento finalizado com sucesso.")
-            st.dataframe(df_preview, use_container_width=True)
-
-            # Exemplo de export simples para XLSX
-            buffer = BytesIO()
-            with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                df_preview.to_excel(writer, index=False, sheet_name="Preview")
-            buffer.seek(0)
-            st.download_button(
-                "Baixar XLSX (preview)",
-                data=buffer.getvalue(),
-                file_name="archivo_gastos_preview.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
-
-        except Exception as e:
-            st.error("Erro durante o processamento.")
-            st.exception(e)
-    else:
-        st.info("Envie arquivo(s) e clique em **Executar** para iniciar.")
+    elif mode == "plantilla":
+        st.info("🧩 *Plantilla Gastos* — em breve conectaremos a lógica aqui.")
+    elif mode == "asientos":
+        st.info("📒 *Asientos* — em breve conectaremos a lógica aqui.")
