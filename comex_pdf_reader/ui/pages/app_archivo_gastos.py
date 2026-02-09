@@ -3,14 +3,13 @@ import re
 import numpy as np
 import streamlit as st
 import pandas as pd
-
 from io import BytesIO
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Font
 
-# ------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Estado e helpers
-# ------------------------------------------------------------
+# -----------------------------------------------------------------------------
 def _ensure_state():
     """
     Garante que todas as chaves necessárias existam em st.session_state,
@@ -19,7 +18,6 @@ def _ensure_state():
     # Cria o dicionário de estado principal se não existir
     if "aag_state" not in st.session_state or not isinstance(st.session_state["aag_state"], dict):
         st.session_state["aag_state"] = {}
-
     aag = st.session_state["aag_state"]
 
     # Keys dos uploaders separadas por modo (evita conflito de cache do Streamlit)
@@ -33,13 +31,15 @@ def _ensure_state():
     if "aag_mode" not in st.session_state:
         st.session_state["aag_mode"] = "estado"  # default
 
+
 def _set_mode(mode: str):
     st.session_state["aag_mode"] = mode
 
-# ------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
 # Parsers - ESTADO DE CUENTA (.txt)
-# ------------------------------------------------------------
-_NUM = r"(-?\d[\d,]*\.\d{2}-?)"   # número com milhares e 2 decimais; pode terminar com '-' (negativo)
+# -----------------------------------------------------------------------------
+_NUM = r"(\-?\d[\d,]*\.\d{2}\-?)"  # número com milhares e 2 decimais; pode terminar com '-' (negativo)
 
 def _clean_num(s: str) -> float | None:
     """
@@ -59,6 +59,7 @@ def _clean_num(s: str) -> float | None:
     except Exception:
         return None
 
+
 def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
     """
     Lê um relatório 'Listado de Saldos' em texto e retorna um DataFrame com:
@@ -69,7 +70,7 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
     # Encontrar início após o cabeçalho (linha que contém "CTA Descripción")
     start_idx = 0
     for i, ln in enumerate(linhas):
-        if "CTA" in ln and "Descripción" in ln:
+        if "CTA" in ln and "Descripci" in ln:
             start_idx = i + 1
             break
 
@@ -89,7 +90,7 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
             continue
 
         # Parte à esquerda dos 4 números
-        left = raw[:m.start()].rstrip()
+        left = raw[: m.start()].rstrip()
         if not left:
             continue
 
@@ -100,7 +101,6 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
 
         # Extrai e normaliza números
         sal_ob, saldo_ob, periodo, saldo_cb = (_clean_num(x) for x in m.groups())
-
         dados.append([cta, descr, sal_ob, saldo_ob, periodo, saldo_cb])
 
     cols = ["CTA", "Descripción", "Sal OB", "Saldo OB", "Período", "Saldo CB"]
@@ -112,9 +112,10 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
 
     return df
 
-# ------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
 # Export XLSX com máscara numérica #,##0.00 (mantém tipo numérico)
-# ------------------------------------------------------------
+# -----------------------------------------------------------------------------
 def to_xlsx_bytes_numformat(df: pd.DataFrame, sheet_name: str, numeric_cols: list[str]) -> bytes:
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -136,6 +137,7 @@ def to_xlsx_bytes_numformat(df: pd.DataFrame, sheet_name: str, numeric_cols: lis
         WHITE = "FFFFFFFF"
         fill_blue = PatternFill(fill_type="solid", start_color=BLUE, end_color=BLUE)
         font_white_bold = Font(color=WHITE, bold=True)
+
         for cell in ws[1]:
             cell.fill = fill_blue
             cell.font = font_white_bold
@@ -153,9 +155,10 @@ def to_xlsx_bytes_numformat(df: pd.DataFrame, sheet_name: str, numeric_cols: lis
     buffer.seek(0)
     return buffer.getvalue()
 
-# ------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
 # Página
-# ------------------------------------------------------------
+# -----------------------------------------------------------------------------
 def render():
     _ensure_state()
     st.subheader("Aplicación Archivo Gastos")
@@ -175,9 +178,9 @@ def render():
     mode = st.session_state["aag_mode"]
     st.divider()
 
-    # --------------------------------------------------------
-    # Modo: Estado de Cuenta (.txt) — com totalizador
-    # --------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Modo: Estado de Cuenta (.txt) — com totalizador (sem Styler)
+    # -------------------------------------------------------------------------
     if mode == "estado":
         # Garante que a key do uploader exista (mesmo se a sessão veio de versão anterior)
         upl_key_estado = st.session_state["aag_state"].setdefault("uploader_key_estado", "aag_estado_upl_1")
@@ -188,7 +191,7 @@ def render():
             type=["txt"],
             accept_multiple_files=False,
             key=upl_key_estado,
-            help="Ex.: relatório 'Listado de Saldos' exportado do sistema."
+            help="Ex.: relatório 'Listado de Saldos' exportado do sistema.",
         )
 
         col_run, col_clear = st.columns([2, 1])
@@ -198,7 +201,7 @@ def render():
             clear_clicked = st.button("Limpar", use_container_width=True)
 
         if clear_clicked:
-            # Gera nova key para "forçar" o reset do uploader sem quebrar se a key não existe
+            # Gera nova key para “forçar” o reset do uploader
             st.session_state["aag_state"]["uploader_key_estado"] = upl_key_estado + "_x"
             st.rerun()
 
@@ -206,6 +209,7 @@ def render():
             pbar = st.progress(0, text="Lendo arquivo .txt...")
             try:
                 raw_bytes = uploaded.getvalue()
+
                 # Decodificação robusta (UTF-8 -> Latin-1 fallback)
                 try:
                     text = raw_bytes.decode("utf-8")
@@ -218,32 +222,34 @@ def render():
                 # ======== LINHA TOTAL (mantendo dtype numérico) ========
                 if df is not None and not df.empty:
                     numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
-
                     for c in numeric_cols:
                         df[c] = pd.to_numeric(df[c], errors="coerce")
 
                     totals = {c: float(np.nansum(df[c].values)) for c in numeric_cols}
-
                     total_row = {col: "" for col in df.columns}
                     total_row["Descripción"] = "TOTAL"
                     for c in numeric_cols:
                         total_row[c] = totals[c]
-
                     df = pd.concat([df, pd.DataFrame([total_row], columns=df.columns)], ignore_index=True)
 
-                # ======== VISUAL: Styler com 111,111,111.00 em colunas numéricas ========
+                # ======== VISUAL: formatação com column_config (sem Styler) ========
                 numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
-                fmt_dict = {c: "{:,.2f}".format for c in numeric_cols}
-                styler = df.style.format(fmt_dict, na_rep="")
-
                 pbar.progress(70, text="Preparando visualização...")
+
                 if df is None or df.empty:
                     st.warning("Nenhuma linha válida encontrada no arquivo.")
                     pbar.progress(0, text="Aguardando...")
                     return
 
                 st.success("Arquivo processado com sucesso.")
-                st.dataframe(styler, use_container_width=True, height=550)
+                st.dataframe(
+                    df,
+                    use_container_width=True,
+                    height=550,
+                    column_config={
+                        c: st.column_config.NumberColumn(format="%,.2f") for c in numeric_cols if c in df.columns
+                    },
+                )
 
                 pbar.progress(90, text="Gerando arquivos para download...")
                 col_csv, col_xlsx = st.columns(2)
@@ -256,7 +262,9 @@ def render():
                         use_container_width=True,
                     )
                 with col_xlsx:
-                    xlsx_bytes = to_xlsx_bytes_numformat(df, sheet_name="EstadoCuenta", numeric_cols=numeric_cols)
+                    xlsx_bytes = to_xlsx_bytes_numformat(
+                        df, sheet_name="EstadoCuenta", numeric_cols=numeric_cols
+                    )
                     st.download_button(
                         label="Baixar XLSX (Estado de Cuenta)",
                         data=xlsx_bytes,
@@ -270,9 +278,9 @@ def render():
                 st.error("Erro ao processar o arquivo .txt.")
                 st.exception(e)
 
-    # --------------------------------------------------------
-    # Modo: Plantilla Gastos (.xlsx/.xls) — SEM totalizador
-    # --------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Modo: Plantilla Gastos (.xlsx/.xls) — SEM totalizador (sem Styler)
+    # -------------------------------------------------------------------------
     elif mode == "plantilla":
         upl_key_pg = st.session_state["aag_state"].setdefault("uploader_key_pg", "aag_pg_upl_1")
 
@@ -282,7 +290,7 @@ def render():
             type=["xlsx", "xls"],
             accept_multiple_files=False,
             key=upl_key_pg,
-            help="A coluna 'Amount' será formatada como 111,111,111.00 na visualização e no XLSX."
+            help="A coluna 'Amount' será formatada como 111,111,111.00 na visualização e no XLSX.",
         )
 
         col_run, col_clear = st.columns([2, 1])
@@ -300,7 +308,6 @@ def render():
             try:
                 name = getattr(uploaded_xl, "name", "").lower()
                 engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
-
                 df_pg = pd.read_excel(uploaded_xl, sheet_name=0, engine=engine)
 
                 # Detecta coluna Amount (case-insensitive)
@@ -313,6 +320,7 @@ def render():
                     candidates = [c for c in df_pg.columns if "amount" in str(c).strip().lower()]
                     if candidates:
                         amount_col = candidates[0]
+
                 if amount_col is None:
                     st.error("Coluna 'Amount' não encontrada no arquivo.")
                     return
@@ -320,12 +328,17 @@ def render():
                 # Garante tipo numérico em Amount
                 df_pg[amount_col] = pd.to_numeric(df_pg[amount_col], errors="coerce")
 
-                # VISUAL: apenas Amount com 111,111,111.00
-                styler_pg = df_pg.style.format({amount_col: "{:,.2f}".format}, na_rep="")
-
+                # VISUAL: apenas Amount com 111,111,111.00 (sem Styler)
                 pbar.progress(70, text="Preparando visualização...")
                 st.success("Arquivo carregado com sucesso.")
-                st.dataframe(styler_pg, use_container_width=True, height=550)
+                st.dataframe(
+                    df_pg,
+                    use_container_width=True,
+                    height=550,
+                    column_config={
+                        str(amount_col): st.column_config.NumberColumn(format="%,.2f")
+                    },
+                )
 
                 pbar.progress(90, text="Gerando arquivos para download...")
                 col_csv, col_xlsx = st.columns(2)
@@ -338,7 +351,9 @@ def render():
                         use_container_width=True,
                     )
                 with col_xlsx:
-                    xlsx_bytes = to_xlsx_bytes_numformat(df_pg, sheet_name="PlantillaGastos", numeric_cols=[amount_col])
+                    xlsx_bytes = to_xlsx_bytes_numformat(
+                        df_pg, sheet_name="PlantillaGastos", numeric_cols=[amount_col]
+                    )
                     st.download_button(
                         label="Baixar XLSX (Plantilla Gastos)",
                         data=xlsx_bytes,
@@ -352,8 +367,8 @@ def render():
                 st.error("Erro ao processar o arquivo Excel.")
                 st.exception(e)
 
-    # --------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Modo: Asientos — placeholder
-    # --------------------------------------------------------
+    # -------------------------------------------------------------------------
     elif mode == "asientos":
         st.info("📒 *Asientos* — em breve conectaremos a lógica aqui.")
