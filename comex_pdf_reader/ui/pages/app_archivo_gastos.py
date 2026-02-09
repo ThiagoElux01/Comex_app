@@ -6,7 +6,7 @@ import pandas as pd
 
 from io import BytesIO
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import numbers, PatternFill, Font
+from openpyxl.styles import PatternFill, Font
 
 # ------------------------------------------------------------
 # Estado e helpers
@@ -14,7 +14,9 @@ from openpyxl.styles import numbers, PatternFill, Font
 def _ensure_state():
     if "aag_state" not in st.session_state:
         st.session_state["aag_state"] = {
-            "uploader_key": "aag_uploader_1",
+            # uploaders separados por modo para evitar conflito de cache
+            "uploader_key_estado": "aag_estado_upl_1",
+            "uploader_key_pg": "aag_pg_upl_1",
             "last_action": None,      # "estado" | "plantilla" | "asientos"
         }
     if "aag_mode" not in st.session_state:
@@ -24,7 +26,7 @@ def _set_mode(mode: str):
     st.session_state["aag_mode"] = mode
 
 # ------------------------------------------------------------
-# Parsers
+# Parsers - ESTADO DE CUENTA (.txt)
 # ------------------------------------------------------------
 _NUM = r"(-?\d[\d,]*\.\d{2}-?)"   # número com milhares e 2 decimais; pode terminar com '-' (negativo)
 
@@ -108,18 +110,17 @@ def to_xlsx_bytes_numformat(df: pd.DataFrame, sheet_name: str, numeric_cols: lis
         df.to_excel(writer, index=False, sheet_name=sheet_name)
         ws = writer.book[sheet_name]
 
-        # Aplica máscara #,##0.00 nas colunas numéricas
+        # Aplica máscara #,##0.00 nas colunas numéricas indicadas
         for col_name in numeric_cols:
             if col_name not in df.columns:
                 continue
             col_idx = df.columns.get_loc(col_name) + 1  # 1-based
             for row in range(2, ws.max_row + 1):  # pulando cabeçalho
                 cell = ws.cell(row=row, column=col_idx)
-                # aplica formato só se for número
                 if isinstance(cell.value, (int, float)) and cell.value is not None:
                     cell.number_format = '#,##0.00'
 
-        # Pintar cabeçalho (igual vibe da Aplicación Comex)
+        # Cabeçalho estilizado (azul) e ajuste de largura simples
         BLUE = "FF0077B6"
         WHITE = "FFFFFFFF"
         fill_blue = PatternFill(fill_type="solid", start_color=BLUE, end_color=BLUE)
@@ -128,7 +129,6 @@ def to_xlsx_bytes_numformat(df: pd.DataFrame, sheet_name: str, numeric_cols: lis
             cell.fill = fill_blue
             cell.font = font_white_bold
 
-        # Ajuste de largura simples
         for col_idx in range(1, ws.max_column + 1):
             max_len = 10
             for row in range(1, ws.max_row + 1):
@@ -165,7 +165,7 @@ def render():
     st.divider()
 
     # --------------------------------------------------------
-    # Modo: Estado de Cuenta
+    # Modo: Estado de Cuenta (.txt) — com totalizador
     # --------------------------------------------------------
     if mode == "estado":
         st.caption("Carregue o arquivo **.txt** de *Listado de Saldos* para visualização e export.")
@@ -173,7 +173,7 @@ def render():
             "Selecionar arquivo (.txt)",
             type=["txt"],
             accept_multiple_files=False,
-            key=st.session_state["aag_state"]["uploader_key"],
+            key=st.session_state["aag_state"]["uploader_key_estado"],
             help="Ex.: relatório 'Listado de Saldos' exportado do sistema."
         )
 
@@ -184,14 +184,14 @@ def render():
             clear_clicked = st.button("Limpar", use_container_width=True)
 
         if clear_clicked:
-            st.session_state["aag_state"]["uploader_key"] = st.session_state["aag_state"]["uploader_key"] + "_x"
+            st.session_state["aag_state"]["uploader_key_estado"] += "_x"
             st.rerun()
 
         if run_clicked and uploaded is not None:
             pbar = st.progress(0, text="Lendo arquivo .txt...")
             try:
                 raw_bytes = uploaded.getvalue()
-                # Decodificação robusta (primeiro UTF-8, se falhar cai para Latin-1)
+                # Decodificação robusta (UTF-8 -> Latin-1 fallback)
                 try:
                     text = raw_bytes.decode("utf-8")
                 except UnicodeDecodeError:
@@ -204,31 +204,22 @@ def render():
                 if df is not None and not df.empty:
                     numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
 
-                    # 1) Garante float nas colunas numéricas
                     for c in numeric_cols:
                         df[c] = pd.to_numeric(df[c], errors="coerce")
 
-                    # 2) Soma com numpy (ignora NaN)
                     totals = {c: float(np.nansum(df[c].values)) for c in numeric_cols}
 
-                    # 3) Cria linha TOTAL
                     total_row = {col: "" for col in df.columns}
                     total_row["Descripción"] = "TOTAL"
                     for c in numeric_cols:
                         total_row[c] = totals[c]
 
-                    # 4) Concatena TOTAL
                     df = pd.concat([df, pd.DataFrame([total_row], columns=df.columns)], ignore_index=True)
 
-                # ======== VISUAL: formatação com Styler (alinha à direita e mostra 111,111,111.00) ========
+                # ======== VISUAL: Styler com 111,111,111.00 em colunas numéricas ========
                 numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
                 fmt_dict = {c: "{:,.2f}".format for c in numeric_cols}
-
-                # NB: st.dataframe aceita Styler e preserva alinhamento à direita de números
-                styler = (
-                    df.style
-                    .format(fmt_dict, na_rep="")
-                )
+                styler = df.style.format(fmt_dict, na_rep="")
 
                 pbar.progress(70, text="Preparando visualização...")
                 if df is None or df.empty:
@@ -240,8 +231,6 @@ def render():
                 st.dataframe(styler, use_container_width=True, height=550)
 
                 pbar.progress(90, text="Gerando arquivos para download...")
-                # Downloads:
-                # 1) CSV — mantém numéricos como numéricos (sem formatação de milhar no arquivo)
                 col_csv, col_xlsx = st.columns(2)
                 with col_csv:
                     st.download_button(
@@ -251,8 +240,6 @@ def render():
                         mime="text/csv",
                         use_container_width=True,
                     )
-
-                # 2) XLSX — mantém numérico e aplica máscara #,##0.00
                 with col_xlsx:
                     xlsx_bytes = to_xlsx_bytes_numformat(df, sheet_name="EstadoCuenta", numeric_cols=numeric_cols)
                     st.download_button(
@@ -269,9 +256,94 @@ def render():
                 st.exception(e)
 
     # --------------------------------------------------------
-    # Placeholders para os demais (prontos para receber lógica)
+    # Modo: Plantilla Gastos (.xlsx/.xls) — SEM totalizador
     # --------------------------------------------------------
     elif mode == "plantilla":
-        st.info("🧩 *Plantilla Gastos* — em breve conectaremos a lógica aqui.")
+        st.caption("Carregue o arquivo **Excel** da *Plantilla de Gastos* (primeira aba será lida).")
+        uploaded_xl = st.file_uploader(
+            "Selecionar arquivo (.xlsx ou .xls)",
+            type=["xlsx", "xls"],
+            accept_multiple_files=False,
+            key=st.session_state["aag_state"]["uploader_key_pg"],
+            help="A coluna 'Amount' será formatada como 111,111,111.00 na visualização e no XLSX."
+        )
+
+        col_run, col_clear = st.columns([2, 1])
+        with col_run:
+            run_clicked = st.button("▶️ Executar", type="primary", use_container_width=True, disabled=(uploaded_xl is None))
+        with col_clear:
+            clear_clicked = st.button("Limpar", use_container_width=True)
+
+        if clear_clicked:
+            st.session_state["aag_state"]["uploader_key_pg"] += "_x"
+            st.rerun()
+
+        if run_clicked and uploaded_xl is not None:
+            pbar = st.progress(0, text="Lendo arquivo Excel...")
+            try:
+                # Detecta engine pelo sufixo
+                name = getattr(uploaded_xl, "name", "").lower()
+                engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
+
+                # Lê a primeira aba por padrão
+                df_pg = pd.read_excel(uploaded_xl, sheet_name=0, engine=engine)
+
+                # Descobre a coluna Amount (case-insensitive)
+                amount_col = None
+                for c in df_pg.columns:
+                    if str(c).strip().lower() == "amount":
+                        amount_col = c
+                        break
+
+                if amount_col is None:
+                    # fallback: tenta colunas parecidas
+                    candidates = [c for c in df_pg.columns if "amount" in str(c).strip().lower()]
+                    if candidates:
+                        amount_col = candidates[0]
+
+                if amount_col is None:
+                    st.error("Coluna 'Amount' não encontrada no arquivo.")
+                    return
+
+                # Garante numérico na Amount
+                df_pg[amount_col] = pd.to_numeric(df_pg[amount_col], errors="coerce")
+
+                # VISUAL: somente Amount com 111,111,111.00 (mantendo dtype float)
+                styler_pg = df_pg.style.format({amount_col: "{:,.2f}".format}, na_rep="")
+
+                pbar.progress(70, text="Preparando visualização...")
+                st.success("Arquivo carregado com sucesso.")
+                st.dataframe(styler_pg, use_container_width=True, height=550)
+
+                pbar.progress(90, text="Gerando arquivos para download...")
+                col_csv, col_xlsx = st.columns(2)
+                with col_csv:
+                    # CSV: numérico real (sem máscara no arquivo)
+                    st.download_button(
+                        label="Baixar CSV (Plantilla Gastos)",
+                        data=df_pg.to_csv(index=False).encode("utf-8"),
+                        file_name="plantilla_gastos.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+                with col_xlsx:
+                    # XLSX: aplica máscara #,##0.00 apenas na coluna Amount
+                    xlsx_bytes = to_xlsx_bytes_numformat(df_pg, sheet_name="PlantillaGastos", numeric_cols=[amount_col])
+                    st.download_button(
+                        label="Baixar XLSX (Plantilla Gastos)",
+                        data=xlsx_bytes,
+                        file_name="plantilla_gastos.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                    )
+                pbar.progress(100, text="Concluído.")
+
+            except Exception as e:
+                st.error("Erro ao processar o arquivo Excel.")
+                st.exception(e)
+
+    # --------------------------------------------------------
+    # Modo: Asientos — placeholder
+    # --------------------------------------------------------
     elif mode == "asientos":
         st.info("📒 *Asientos* — em breve conectaremos a lógica aqui.")
