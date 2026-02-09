@@ -4,9 +4,9 @@ import numpy as np
 import streamlit as st
 import pandas as pd
 
-# Reaproveita helper de exportação XLSX da Aplicación Comex
-# (definido em ui/pages/process_pdfs.py)
-from ui.pages.process_pdfs import to_xlsx_bytes  # mesmo padrão de exportação (autofit/estilo)
+from io import BytesIO
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import numbers, PatternFill, Font
 
 # ------------------------------------------------------------
 # Estado e helpers
@@ -100,6 +100,49 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
     return df
 
 # ------------------------------------------------------------
+# Export XLSX com máscara numérica #,##0.00 (mantém tipo numérico)
+# ------------------------------------------------------------
+def to_xlsx_bytes_numformat(df: pd.DataFrame, sheet_name: str, numeric_cols: list[str]) -> bytes:
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+        ws = writer.book[sheet_name]
+
+        # Aplica máscara #,##0.00 nas colunas numéricas
+        for col_name in numeric_cols:
+            if col_name not in df.columns:
+                continue
+            col_idx = df.columns.get_loc(col_name) + 1  # 1-based
+            for row in range(2, ws.max_row + 1):  # pulando cabeçalho
+                cell = ws.cell(row=row, column=col_idx)
+                # aplica formato só se for número
+                if isinstance(cell.value, (int, float)) and cell.value is not None:
+                    cell.number_format = '#,##0.00'
+
+        # Pintar cabeçalho (igual vibe da Aplicación Comex)
+        BLUE = "FF0077B6"
+        WHITE = "FFFFFFFF"
+        fill_blue = PatternFill(fill_type="solid", start_color=BLUE, end_color=BLUE)
+        font_white_bold = Font(color=WHITE, bold=True)
+        for cell in ws[1]:
+            cell.fill = fill_blue
+            cell.font = font_white_bold
+
+        # Ajuste de largura simples
+        for col_idx in range(1, ws.max_column + 1):
+            max_len = 10
+            for row in range(1, ws.max_row + 1):
+                v = ws.cell(row=row, column=col_idx).value
+                if v is None:
+                    continue
+                s = f"{v:,.2f}" if isinstance(v, (int, float)) else str(v)
+                max_len = max(max_len, len(s))
+            ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 2, 60)
+
+    buffer.seek(0)
+    return buffer.getvalue()
+
+# ------------------------------------------------------------
 # Página
 # ------------------------------------------------------------
 def render():
@@ -157,7 +200,7 @@ def render():
                 pbar.progress(35, text="Convertendo para DataFrame...")
                 df = parse_estado_cuenta_txt(text)
 
-                # ======== LINHA TOTAL ========
+                # ======== LINHA TOTAL (mantendo dtype numérico) ========
                 if df is not None and not df.empty:
                     numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
 
@@ -166,54 +209,52 @@ def render():
                         df[c] = pd.to_numeric(df[c], errors="coerce")
 
                     # 2) Soma com numpy (ignora NaN)
-                    totals_dict = {c: float(np.nansum(df[c].values)) for c in numeric_cols}
+                    totals = {c: float(np.nansum(df[c].values)) for c in numeric_cols}
 
-                    # 3) Cria a linha TOTAL (como floats ainda)
+                    # 3) Cria linha TOTAL
                     total_row = {col: "" for col in df.columns}
                     total_row["Descripción"] = "TOTAL"
                     for c in numeric_cols:
-                        total_row[c] = totals_dict[c]
+                        total_row[c] = totals[c]
 
-                    # 4) Concatena a linha TOTAL
+                    # 4) Concatena TOTAL
                     df = pd.concat([df, pd.DataFrame([total_row], columns=df.columns)], ignore_index=True)
 
-                # ======== FORMATAÇÃO 111,111,111.00 (display + downloads) ========
-                def _fmt(v):
-                    if pd.isna(v) or v == "":
-                        return ""
-                    try:
-                        return f"{float(v):,.2f}"
-                    except Exception:
-                        return str(v)
+                # ======== VISUAL: formatação com Styler (alinha à direita e mostra 111,111,111.00) ========
+                numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
+                fmt_dict = {c: "{:,.2f}".format for c in numeric_cols}
 
-                df_fmt = df.copy()
-                if df_fmt is not None and not df_fmt.empty:
-                    for c in ["Sal OB", "Saldo OB", "Período", "Saldo CB"]:
-                        df_fmt[c] = df_fmt[c].apply(_fmt)
-                # ======== FIM DA FORMATAÇÃO ========
+                # NB: st.dataframe aceita Styler e preserva alinhamento à direita de números
+                styler = (
+                    df.style
+                    .format(fmt_dict, na_rep="")
+                )
 
                 pbar.progress(70, text="Preparando visualização...")
-                if df_fmt is None or df_fmt.empty:
+                if df is None or df.empty:
                     st.warning("Nenhuma linha válida encontrada no arquivo.")
                     pbar.progress(0, text="Aguardando...")
                     return
 
                 st.success("Arquivo processado com sucesso.")
-                st.dataframe(df_fmt, use_container_width=True, height=550)
+                st.dataframe(styler, use_container_width=True, height=550)
 
                 pbar.progress(90, text="Gerando arquivos para download...")
-                # Downloads (usam o DataFrame formatado para manter 111,111,111.00)
+                # Downloads:
+                # 1) CSV — mantém numéricos como numéricos (sem formatação de milhar no arquivo)
                 col_csv, col_xlsx = st.columns(2)
                 with col_csv:
                     st.download_button(
                         label="Baixar CSV (Estado de Cuenta)",
-                        data=df_fmt.to_csv(index=False).encode("utf-8"),
+                        data=df.to_csv(index=False).encode("utf-8"),
                         file_name="estado_de_cuenta.csv",
                         mime="text/csv",
                         use_container_width=True,
                     )
+
+                # 2) XLSX — mantém numérico e aplica máscara #,##0.00
                 with col_xlsx:
-                    xlsx_bytes = to_xlsx_bytes(df_fmt, sheet_name="EstadoCuenta")
+                    xlsx_bytes = to_xlsx_bytes_numformat(df, sheet_name="EstadoCuenta", numeric_cols=numeric_cols)
                     st.download_button(
                         label="Baixar XLSX (Estado de Cuenta)",
                         data=xlsx_bytes,
