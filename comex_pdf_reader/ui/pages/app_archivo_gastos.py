@@ -6,7 +6,7 @@ import pandas as pd
 
 # Reaproveita helper de exportação XLSX da Aplicación Comex
 # (definido em ui/pages/process_pdfs.py)
-from ui.pages.process_pdfs import to_xlsx_bytes  # ← reutiliza o mesmo padrão de exportação (autofit/estilo)
+from ui.pages.process_pdfs import to_xlsx_bytes  # ← mesmo padrão de exportação (autofit/estilo) [2](https://electrolux-my.sharepoint.com/personal/thiago_farias_electrolux_com/Documents/Microsoft%20Copilot%20Chat%20Files/home.py)
 
 # ------------------------------------------------------------
 # Estado e helpers
@@ -86,7 +86,7 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
         descr = left[len(cta):].strip() if parts else left.strip()
 
         # Extrai e normaliza números
-        sal_ob, saldo_ob, periodo, saldo_cb = ( _clean_num(x) for x in m.groups() )
+        sal_ob, saldo_ob, periodo, saldo_cb = (_clean_num(x) for x in m.groups())
 
         dados.append([cta, descr, sal_ob, saldo_ob, periodo, saldo_cb])
 
@@ -157,6 +157,19 @@ def render():
                 pbar.progress(35, text="Convertendo para DataFrame...")
                 df = parse_estado_cuenta_txt(text)
 
+                # ======== NOVO: adiciona linha de totais no final ========
+                numeric_cols = df.select_dtypes(include="number").columns
+                totals_row = {col: df[col].sum(skipna=True) for col in numeric_cols}
+                # Preenche colunas não numéricas
+                for col in df.columns:
+                    if col not in totals_row:
+                        totals_row[col] = ""
+                totals_row["Descripción"] = "TOTAL"
+                # Concatena e (opcional) arredonda
+                df = pd.concat([df, pd.DataFrame([totals_row], columns=df.columns)], ignore_index=True)
+                df[numeric_cols] = df[numeric_cols].round(2)
+                # ======== FIM DO BLOCO NOVO ========
+
                 pbar.progress(70, text="Preparando visualização...")
                 if df is None or df.empty:
                     st.warning("Nenhuma linha válida encontrada no arquivo.")
@@ -178,7 +191,7 @@ def render():
                         use_container_width=True,
                     )
                 with col_xlsx:
-                    xlsx_bytes = to_xlsx_bytes(df, sheet_name="EstadoCuenta")  # helper da Aplicación Comex
+                    xlsx_bytes = to_xlsx_bytes(df, sheet_name="EstadoCuenta")  # helper da Aplicación Comex [2](https://electrolux-my.sharepoint.com/personal/thiago_farias_electrolux_com/Documents/Microsoft%20Copilot%20Chat%20Files/home.py)
                     st.download_button(
                         label="Baixar XLSX (Estado de Cuenta)",
                         data=xlsx_bytes,
