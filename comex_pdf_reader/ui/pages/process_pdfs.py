@@ -208,7 +208,7 @@ def render():
     _ensure_state()
     st.subheader("Processar PDFs")
 
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2, tab3, tab4= st.tabs([
         "📥 Processamento local",
         "🌐 Tasa SUNAT",
         "📁 Arquivo Sharepoint",
@@ -554,8 +554,6 @@ def render():
             except Exception as e:
                 st.error("❌ Erro ao processar o arquivo Excel.")
                 st.exception(e)
-
-
     with tab4:
         downloads_page.render()
 
