@@ -24,7 +24,7 @@ def _ensure_state():
     aag.setdefault("uploader_key_estado", "aag_estado_upl_1")
     aag.setdefault("uploader_key_pg", "aag_pg_upl_1")
 
-    # Última ação (não usamos intensamente agora, mas mantemos a estrutura)
+    # Última ação (reserva)
     aag.setdefault("last_action", None)
 
     # Modo atual da página
@@ -106,7 +106,7 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
     cols = ["CTA", "Descripción", "Sal OB", "Saldo OB", "Período", "Saldo CB"]
     df = pd.DataFrame(dados, columns=cols)
 
-    # Tipos numéricos garantidos (caso algo tenha escapado)
+    # Tipos numéricos garantidos
     for c in ["Sal OB", "Saldo OB", "Período", "Saldo CB"]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
@@ -182,7 +182,7 @@ def render():
     # Modo: Estado de Cuenta (.txt) — com totalizador (sem Styler)
     # -------------------------------------------------------------------------
     if mode == "estado":
-        # Garante que a key do uploader exista (mesmo se a sessão veio de versão anterior)
+        # Garante que a key do uploader exista
         upl_key_estado = st.session_state["aag_state"].setdefault("uploader_key_estado", "aag_estado_upl_1")
 
         st.caption("Carregue o arquivo **.txt** de *Listado de Saldos* para visualização e export.")
@@ -201,7 +201,7 @@ def render():
             clear_clicked = st.button("Limpar", use_container_width=True)
 
         if clear_clicked:
-            # Gera nova key para “forçar” o reset do uploader
+            # Força reset do uploader
             st.session_state["aag_state"]["uploader_key_estado"] = upl_key_estado + "_x"
             st.rerun()
 
@@ -247,7 +247,7 @@ def render():
                     use_container_width=True,
                     height=550,
                     column_config={
-                        c: st.column_config.NumberColumn(format="%,.2f") for c in numeric_cols if c in df.columns
+                        c: st.column_config.NumberColumn(format="%.2f") for c in numeric_cols if c in df.columns
                     },
                 )
 
@@ -328,7 +328,7 @@ def render():
                 # Garante tipo numérico em Amount
                 df_pg[amount_col] = pd.to_numeric(df_pg[amount_col], errors="coerce")
 
-                # VISUAL: apenas Amount com 111,111,111.00 (sem Styler)
+                # VISUAL: apenas Amount com 2 casas (sem milhar no componente)
                 pbar.progress(70, text="Preparando visualização...")
                 st.success("Arquivo carregado com sucesso.")
                 st.dataframe(
@@ -336,7 +336,7 @@ def render():
                     use_container_width=True,
                     height=550,
                     column_config={
-                        str(amount_col): st.column_config.NumberColumn(format="%,.2f")
+                        str(amount_col): st.column_config.NumberColumn(format="%.2f")
                     },
                 )
 
