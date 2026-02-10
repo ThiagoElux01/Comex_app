@@ -12,7 +12,6 @@ try:
 except Exception as e:
     ADICIONALES_AVAILABLE = False
     ADICIONALES_ERR = e
-
 if not ADICIONALES_AVAILABLE:
     st.warning(
         "Módulo **Gastos Adicionales** não pôde ser carregado. "
@@ -21,11 +20,9 @@ if not ADICIONALES_AVAILABLE:
     with st.expander("Detalhes técnicos do erro (Adicionales)"):
         st.exception(ADICIONALES_ERR)
 
-
 # -----------------------------
 # Imports protegidos (diagnóstico no app)
 # -----------------------------
-
 # Import protegido do Percepciones
 PERC_AVAILABLE = True
 PERC_ERR = None
@@ -34,7 +31,6 @@ try:
 except Exception as e:
     PERC_AVAILABLE = False
     PERC_ERR = e
-
 if not PERC_AVAILABLE:
     st.warning(
         "Módulo **Percepciones** não pôde ser carregado. "
@@ -69,7 +65,6 @@ try:
 except Exception as e:
     EXTERNOS_AVAILABLE = False
     EXTERNOS_ERR = e
-
 if not EXTERNOS_AVAILABLE:
     st.warning(
         "Módulo **Externos** não pôde ser carregado. "
@@ -84,7 +79,7 @@ if not EXTERNOS_AVAILABLE:
 from io import BytesIO
 import pandas as pd
 
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # INCLUSÃO: utilitário para ajustar largura ("autofit") das colunas no Excel
 from openpyxl.utils import get_column_letter
 
@@ -95,14 +90,12 @@ def _autofit_worksheet(ws, font_padding: float = 1.2, min_width: float = 8.0, ma
     """
     if ws.max_column is None or ws.max_row is None:
         return
-
     for col_idx, col in enumerate(
         ws.iter_cols(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column),
         start=1
     ):
         header = col[0].value if col and col[0] is not None else ""
         max_len = len(str(header)) if header is not None else 0
-
         for cell in col[1:]:  # ignora o cabeçalho já contabilizado
             val = cell.value
             if val is None:
@@ -110,10 +103,8 @@ def _autofit_worksheet(ws, font_padding: float = 1.2, min_width: float = 8.0, ma
             # Representação razoável para floats (evita notação científica gigante)
             text = f"{val:.6g}" if isinstance(val, float) else str(val)
             max_len = max(max_len, len(text))
-
         width = min(max(max_len * font_padding, min_width), max_width)
         ws.column_dimensions[get_column_letter(col_idx)].width = width
-# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 from openpyxl.styles import PatternFill, Font
 
@@ -122,9 +113,8 @@ def header_paint(ws):
     Pinta o cabeçalho (linha 1) apenas quando o texto for
     exatamente igual (case-sensitive) a um dos nomes definidos.
     """
-    BLUE = "FF0077B6"   # ARGB (FF = opacidade total)
+    BLUE = "FF0077B6"  # ARGB (FF = opacidade total)
     WHITE = "FFFFFFFF"
-
     fill_blue = PatternFill(fill_type="solid", start_color=BLUE, end_color=BLUE)
     font_white_bold = Font(color=WHITE, bold=True)
 
@@ -162,7 +152,6 @@ def header_paint(ws):
         "Monto",
         "COD MONEDA",
     }
-
     # Percorre somente a linha 1 (cabeçalho)
     for cell in ws[1]:
         if cell.value is None:
@@ -172,6 +161,7 @@ def header_paint(ws):
             cell.fill = fill_blue
             cell.font = font_white_bold
 
+
 def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Tasa") -> bytes:
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -179,6 +169,60 @@ def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Tasa") -> bytes:
         ws = writer.book[sheet_name]
         _autofit_worksheet(ws)
         header_paint(ws)  # <- aqui
+    buffer.seek(0)
+    return buffer.getvalue()
+
+# -----------------------------------------------------------------------------
+# NOVO: criar DF com linhas em branco entre cada registro
+# -----------------------------------------------------------------------------
+def df_with_blank_spacers(df: pd.DataFrame, blank_rows: int = 3) -> pd.DataFrame:
+    """
+    Retorna um novo DataFrame onde após cada linha há `blank_rows` linhas vazias.
+    Mantém as mesmas colunas; as linhas vazias são None.
+    """
+    if df is None or df.empty:
+        return df.copy()
+
+    blocks = []
+    blank = pd.DataFrame([[None] * len(df.columns)], columns=df.columns)
+    for _, row in df.iterrows():
+        blocks.append(pd.DataFrame([row.values], columns=df.columns))
+        for _ in range(blank_rows):
+            blocks.append(blank.copy())
+
+    out = pd.concat(blocks, ignore_index=True)
+    return out
+
+# -----------------------------------------------------------------------------
+# NOVO: gerar XLSX de Externos com duas abas (normal + espaçado)
+# -----------------------------------------------------------------------------
+def to_xlsx_bytes_externos_duas_abas(
+    df_normal: pd.DataFrame,
+    sheet_normal: str = "Externos",
+    sheet_spaced: str = "Externos_Espacado",
+    blank_rows: int = 3
+) -> bytes:
+    """
+    Cria um XLSX com:
+      - Aba 1: dados originais de 'Externos'
+      - Aba 2: os mesmos dados, mas com 3 linhas em branco abaixo de cada registro
+    Aplica auto-ajuste e pintura do cabeçalho em ambas as abas.
+    """
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        # Aba normal
+        df_normal.to_excel(writer, index=False, sheet_name=sheet_normal)
+        ws1 = writer.book[sheet_normal]
+        _autofit_worksheet(ws1)
+        header_paint(ws1)
+
+        # Aba espaçada
+        df_spaced = df_with_blank_spacers(df_normal, blank_rows=blank_rows)
+        df_spaced.to_excel(writer, index=False, sheet_name=sheet_spaced)
+        ws2 = writer.book[sheet_spaced]
+        _autofit_worksheet(ws2)
+        header_paint(ws2)
+
     buffer.seek(0)
     return buffer.getvalue()
 
@@ -207,7 +251,6 @@ def _select_action(action_key: str):
 def render():
     _ensure_state()
     st.subheader("Aplicación Comex")
-
     tab1, tab2, tab3, tab4= st.tabs([
         "📥 Processamento local",
         "🌐 Tasa SUNAT",
@@ -248,7 +291,7 @@ def render():
 
         st.divider()
 
-        # ❗️Somente mostra uploader/execução quando há ação selecionada
+        # ❗️Somente mostra uploader/execução quando há a ação selecionada
         if has_action:
             uploaded_files = st.file_uploader(
                 f"Envie um ou mais arquivos PDF para **{ACTIONS[st.session_state.acao_selecionada]}**",
@@ -257,7 +300,6 @@ def render():
                 key=st.session_state.uploader_key,
                 help="Os arquivos enviados serão processados pelo fluxo selecionado."
             )
-
             col_run, col_clear = st.columns([2, 1])
             with col_run:
                 run_clicked = st.button(
@@ -285,7 +327,6 @@ def render():
                     cambio_df = st.session_state.get("tasa_df")
                     if cambio_df is None or getattr(cambio_df, "empty", True):
                         st.warning("Para calcular **Tasa**, primeiro atualize no tab **🌐 Tasa SUNAT**. O processamento seguirá sem Tasa.")
-
                     if not DUAS_AVAILABLE:
                         st.error("DUAS indisponível: confira dependências e arquivo `services/duas_service.py`.")
                     else:
@@ -298,7 +339,6 @@ def render():
                         if df_final is not None and not df_final.empty:
                             st.success("Fluxo DUAS concluído!")
                             st.dataframe(df_final.head(50), use_container_width=True)
-
                             col_csv, col_xlsx = st.columns(2)
                             with col_csv:
                                 st.download_button(
@@ -331,12 +371,10 @@ def render():
                             progress_widget=progress,
                             status_widget=status,
                         )
-
                         # Resultado
                         if df_final is not None and not df_final.empty:
                             st.success("Percepciones concluído!")
                             st.dataframe(df_final.head(50), use_container_width=True)
-
                             # Botões de download
                             col_csv, col_xlsx = st.columns(2)
                             with col_csv:
@@ -359,7 +397,7 @@ def render():
                         else:
                             st.warning("Nenhuma informação válida encontrada nos PDFs para Percepciones.")
 
-                # --- NOVO: fluxo real para Externos (sem afetar os demais) ---
+                # --- NOVO: fluxo real para Externos (com XLSX de duas abas) ---
                 elif acao == "externos":
                     if not EXTERNOS_AVAILABLE:
                         st.error("Externos indisponível: confira dependências e `services/externos_service.py`.")
@@ -371,11 +409,9 @@ def render():
                             status_widget=status,
                             cambio_df=cambio_df,
                         )
-
                         if df_final is not None and not df_final.empty:
                             st.success("Externos concluído!")
                             st.dataframe(df_final.head(50), use_container_width=True)
-
                             col_csv, col_xlsx = st.columns(2)
                             with col_csv:
                                 st.download_button(
@@ -386,7 +422,13 @@ def render():
                                     use_container_width=True,
                                 )
                             with col_xlsx:
-                                xlsx_bytes = to_xlsx_bytes(df_final, sheet_name="Externos")
+                                # >>> ALTERADO: gerar XLSX com duas abas (normal + espaçado)
+                                xlsx_bytes = to_xlsx_bytes_externos_duas_abas(
+                                    df_normal=df_final,
+                                    sheet_normal="Externos",
+                                    sheet_spaced="Externos_Espacado",
+                                    blank_rows=3,
+                                )
                                 st.download_button(
                                     label="Baixar XLSX (Externos)",
                                     data=xlsx_bytes,
@@ -408,11 +450,9 @@ def render():
                             status_widget=status,
                             cambio_df=cambio_df,
                         )
-                
                         if df_final is not None and not df_final.empty:
                             st.success("Gastos Adicionales concluído!")
                             st.dataframe(df_final.head(50), use_container_width=True)
-                
                             col_csv, col_xlsx = st.columns(2)
                             with col_csv:
                                 st.download_button(
@@ -435,7 +475,7 @@ def render():
                             st.warning("Nenhuma informação válida encontrada nos PDFs para Gastos Adicionales.")
 
     # -------------------------
-    # 🌐 Tasa SUNAT  (renderiza SEMPRE, independente do tab1)
+    # 🌐 Tasa SUNAT (renderiza SEMPRE, independente do tab1)
     # -------------------------
     with tab2:
         st.write("Baixar e consolidar Tasa (SUNAT) direto do site oficial.")
@@ -454,7 +494,6 @@ def render():
                 st.session_state.tasa_df = df.copy()
                 st.success("Tasa consolidada com sucesso (armazenada para uso no DUAS/Externos).")
                 st.dataframe(df.head(30), use_container_width=True)
-
                 col_csv, col_xlsx = st.columns(2)
                 with col_csv:
                     st.download_button(
@@ -477,24 +516,16 @@ def render():
                 st.warning("Não foi possível obter dados da Tasa. Verifique credenciais/token/cookie.")
 
     # -------------------------
-    # 📁 Arquivo Sharepoint  (renderiza SEMPRE, independente do tab3)
+    # 📁 Arquivo Sharepoint (renderiza SEMPRE, independente do tab3)
     # -------------------------
-
-    # -------------------------
-    # 📁 Arquivo Sharepoint
-    # -------------------------
-
     with tab3:
-    
         st.subheader("📁 Arquivo Sharepoint")
         st.caption("Carregue um arquivo Excel para leitura da aba 'all'.")
-    
         uploaded_excel = st.file_uploader(
             "Carregar Arquivo",
             type=["xlsx", "xls"],
             key="sharepoint_excel_uploader"
         )
-    
         if uploaded_excel:
             try:
                 df_all = pd.read_excel(
@@ -505,24 +536,19 @@ def render():
                     nrows=20000,
                     engine="openpyxl"
                 )
-    
                 from services.sharepoint_utils import ajustar_sharepoint_df
                 df_all = ajustar_sharepoint_df(df_all)
-    
                 st.session_state["sharepoint_df"] = df_all
                 st.success("✔️ DataFrame atualizado")
-    
                 st.dataframe(
                     df_all,
                     use_container_width=True,
                     height=500
                 )
-    
-                # ➜ ADICIONAR DOWNLOAD AQUI
+
+                # ⤵ ADICIONAR DOWNLOAD AQUI
                 st.subheader("⬇️ Downloads do Arquivo SharePoint")
-    
                 col_csv, col_xlsx = st.columns(2)
-    
                 with col_csv:
                     st.download_button(
                         label="Baixar CSV (SharePoint)",
@@ -531,7 +557,6 @@ def render():
                         mime="text/csv",
                         use_container_width=True
                     )
-    
                 with col_xlsx:
                     buffer = BytesIO()
                     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -540,7 +565,6 @@ def render():
                         ws = writer.book["SharePoint"]
                         _autofit_worksheet(ws)
                     buffer.seek(0)
-    
                     st.download_button(
                         label="Baixar XLSX (SharePoint)",
                         data=buffer,
@@ -548,12 +572,11 @@ def render():
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
-    
             except ValueError:
                 st.error("❌ A aba 'all' não foi encontrada no arquivo Excel.")
             except Exception as e:
                 st.error("❌ Erro ao processar o arquivo Excel.")
                 st.exception(e)
+
     with tab4:
         downloads_page.render()
-
