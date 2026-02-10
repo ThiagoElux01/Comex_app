@@ -723,68 +723,68 @@ def render():
         downloads_page.render()
     
     with tab5:
-    st.subheader("🗎 Transformar .prn")
-    st.caption("Selecione um fluxo abaixo e carregue o Excel (primeira aba = Carga Financeira, segunda aba = Carga Contábil).")
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        btn_duas = st.button("Duas", use_container_width=True)
-    with c2:
-        btn_externos = st.button("Externos", use_container_width=True)
-    with c3:
-        btn_gastos = st.button("Gastos Adicionales", use_container_width=True)
-
-    st.divider()
-
-    # -------------------- FLUXO EXTERNOS (implementado) --------------------
-    if btn_externos:
-        st.info("Fluxo **Externos** selecionado. Carregue o arquivo Excel.")
-        uploaded_xl = st.file_uploader(
-            "Carregar Excel (.xlsx ou .xls) para gerar PRN",
-            type=["xlsx", "xls"],
-            key="prn_externos_upl",
-            accept_multiple_files=False,
-            help="A 1ª aba será usada para 'Externos.prn' (Carga_Financeira) e a 2ª para 'aexternos.prn' (Carga_Contabil)."
-        )
-        if uploaded_xl:
-            colg1, colg2 = st.columns(2)
-            with colg1:
-                if st.button("Gerar Externos.prn", type="primary", use_container_width=True):
-                    try:
-                        prn_bytes = gerar_externos_prn_primeira_aba(uploaded_xl)
-                        st.success("Arquivo **Externos.prn** gerado!")
-                        st.download_button(
-                            "Baixar Externos.prn",
-                            data=prn_bytes,
-                            file_name="Externos.prn",
-                            mime="text/plain",
-                            use_container_width=True
-                        )
-                    except Exception as e:
-                        st.error("Falha ao gerar Externos.prn")
-                        st.exception(e)
-            with colg2:
-                if st.button("Gerar aexternos.prn", type="secondary", use_container_width=True):
-                    try:
-                        prn_bytes2 = gerar_externos_prn_segunda_aba(uploaded_xl)
-                        st.success("Arquivo **aexternos.prn** gerado!")
-                        st.download_button(
-                            "Baixar aexternos.prn",
-                            data=prn_bytes2,
-                            file_name="aexternos.prn",
-                            mime="text/plain",
-                            use_container_width=True
-                        )
-                    except Exception as e:
-                        st.error("Falha ao gerar aexternos.prn")
-                        st.exception(e)
-
-    # -------------------- FLUXO DUAS (placeholder) --------------------
-    if btn_duas:
-        st.info("Fluxo **Duas** selecionado. (Em breve: lógica específica para gerar PRN a partir do Excel.)")
-        st.caption("Se quiser, já me passe a macro/algoritmo e eu programo aqui.")
-
-    # -------------------- FLUXO GASTOS ADICIONALES (placeholder) --------------------
-    if btn_gastos:
-        st.info("Fluxo **Gastos Adicionales** selecionado. (Em breve: lógica específica para gerar PRN a partir do Excel.)")
-        st.caption("Me envie a macro/algoritmo e implemento igual fiz no Externos.")
+        st.subheader("🗎 Transformar .prn")
+        st.caption("Selecione um fluxo abaixo e carregue o Excel (primeira aba = Carga Financeira, segunda aba = Carga Contábil).")
+    
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            btn_duas = st.button("Duas", use_container_width=True)
+        with c2:
+            btn_externos = st.button("Externos", use_container_width=True)
+        with c3:
+            btn_gastos = st.button("Gastos Adicionales", use_container_width=True)
+    
+        st.divider()
+    
+        # -------------------- FLUXO EXTERNOS (implementado) --------------------
+        if btn_externos:
+            st.info("Fluxo **Externos** selecionado. Carregue o arquivo Excel.")
+            uploaded_xl = st.file_uploader(
+                "Carregar Excel (.xlsx ou .xls) para gerar PRN",
+                type=["xlsx", "xls"],
+                key="prn_externos_upl",
+                accept_multiple_files=False,
+                help="A 1ª aba será usada para 'Externos.prn' (Carga_Financeira) e a 2ª para 'aexternos.prn' (Carga_Contabil)."
+            )
+            if uploaded_xl:
+                colg1, colg2 = st.columns(2)
+                with colg1:
+                    if st.button("Gerar Externos.prn", type="primary", use_container_width=True):
+                        try:
+                            prn_bytes = gerar_externos_prn_primeira_aba(uploaded_xl)
+                            st.success("Arquivo **Externos.prn** gerado!")
+                            st.download_button(
+                                "Baixar Externos.prn",
+                                data=prn_bytes,
+                                file_name="Externos.prn",
+                                mime="text/plain",
+                                use_container_width=True
+                            )
+                        except Exception as e:
+                            st.error("Falha ao gerar Externos.prn")
+                            st.exception(e)
+                with colg2:
+                    if st.button("Gerar aexternos.prn", type="secondary", use_container_width=True):
+                        try:
+                            prn_bytes2 = gerar_externos_prn_segunda_aba(uploaded_xl)
+                            st.success("Arquivo **aexternos.prn** gerado!")
+                            st.download_button(
+                                "Baixar aexternos.prn",
+                                data=prn_bytes2,
+                                file_name="aexternos.prn",
+                                mime="text/plain",
+                                use_container_width=True
+                            )
+                        except Exception as e:
+                            st.error("Falha ao gerar aexternos.prn")
+                            st.exception(e)
+    
+        # -------------------- FLUXO DUAS (placeholder) --------------------
+        if btn_duas:
+            st.info("Fluxo **Duas** selecionado. (Em breve: lógica específica para gerar PRN a partir do Excel.)")
+            st.caption("Se quiser, já me passe a macro/algoritmo e eu programo aqui.")
+    
+        # -------------------- FLUXO GASTOS ADICIONALES (placeholder) --------------------
+        if btn_gastos:
+            st.info("Fluxo **Gastos Adicionales** selecionado. (Em breve: lógica específica para gerar PRN a partir do Excel.)")
+            st.caption("Me envie a macro/algoritmo e implemento igual fiz no Externos.")
