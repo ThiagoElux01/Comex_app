@@ -257,7 +257,7 @@ def render():
         "🌐 Tasa SUNAT",
         "📁 Arquivo Sharepoint",
         "📥 Processamento local",
-        "🗎 Transformar .prn"
+        "📝 Transformar .prn"
     ])
     # -------------------------
     # 📥 Processamento local
