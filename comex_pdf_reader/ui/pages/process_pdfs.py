@@ -252,13 +252,13 @@ def _select_action(action_key: str):
 def render():
     _ensure_state()
     st.subheader("Aplicación Comex")
-    tab4, tab2, tab3, tab1 = st.tabs([
+    tab4, tab2, tab3, tab1, tab5 = st.tabs([
         "📦 Arquivos modelo",
         "🌐 Tasa SUNAT",
         "📁 Arquivo Sharepoint",
-        "📥 Processamento local"
+        "📥 Processamento local",
+        "🗎 Transformar .prn"
     ])
-
     # -------------------------
     # 📥 Processamento local
     # -------------------------
