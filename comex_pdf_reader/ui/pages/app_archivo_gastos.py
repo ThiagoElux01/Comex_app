@@ -31,10 +31,8 @@ def _ensure_state():
     if "aag_mode" not in st.session_state:
         st.session_state["aag_mode"] = "estado"  # default
 
-
 def _set_mode(mode: str):
     st.session_state["aag_mode"] = mode
-
 
 # -----------------------------------------------------------------------------
 # Parsers - ESTADO DE CUENTA (.txt)
@@ -58,7 +56,6 @@ def _clean_num(s: str) -> float | None:
         return -v if neg else v
     except Exception:
         return None
-
 
 def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
     """
@@ -109,9 +106,7 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
     # Tipos numéricos garantidos
     for c in ["Sal OB", "Saldo OB", "Período", "Saldo CB"]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
-
     return df
-
 
 # -----------------------------------------------------------------------------
 # Export XLSX com máscara numérica #,##0.00 (mantém tipo numérico)
@@ -155,7 +150,6 @@ def to_xlsx_bytes_numformat(df: pd.DataFrame, sheet_name: str, numeric_cols: lis
     buffer.seek(0)
     return buffer.getvalue()
 
-
 # -----------------------------------------------------------------------------
 # Página
 # -----------------------------------------------------------------------------
@@ -172,8 +166,9 @@ def render():
         if st.button("Plantilla Gastos", use_container_width=True):
             _set_mode("plantilla")
     with col_b3:
+        # RÓTULO ATUALIZADO
         if st.button("Analise", use_container_width=True):
-            _set_mode("Analise")
+            _set_mode("asientos")
 
     mode = st.session_state["aag_mode"]
     st.divider()
@@ -209,7 +204,6 @@ def render():
             pbar = st.progress(0, text="Lendo arquivo .txt...")
             try:
                 raw_bytes = uploaded.getvalue()
-
                 # Decodificação robusta (UTF-8 -> Latin-1 fallback)
                 try:
                     text = raw_bytes.decode("utf-8")
@@ -224,7 +218,6 @@ def render():
                     numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
                     for c in numeric_cols:
                         df[c] = pd.to_numeric(df[c], errors="coerce")
-
                     totals = {c: float(np.nansum(df[c].values)) for c in numeric_cols}
                     total_row = {col: "" for col in df.columns}
                     total_row["Descripción"] = "TOTAL"
@@ -272,14 +265,14 @@ def render():
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True,
                     )
-                pbar.progress(100, text="Concluído.")
 
+                pbar.progress(100, text="Concluído.")
             except Exception as e:
                 st.error("Erro ao processar o arquivo .txt.")
                 st.exception(e)
 
     # -------------------------------------------------------------------------
-    # Modo: Plantilla Gastos (.xlsx/.xls) — SEM totalizador (sem Styler)
+    # Modo: Plantilla de Gastos (.xlsx/.xls) — SEM totalizador (sem Styler)
     # -------------------------------------------------------------------------
     elif mode == "plantilla":
         upl_key_pg = st.session_state["aag_state"].setdefault("uploader_key_pg", "aag_pg_upl_1")
@@ -361,14 +354,218 @@ def render():
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True,
                     )
-                pbar.progress(100, text="Concluído.")
 
+                pbar.progress(100, text="Concluído.")
             except Exception as e:
                 st.error("Erro ao processar o arquivo Excel.")
                 st.exception(e)
 
     # -------------------------------------------------------------------------
-    # Modo: Analise — placeholder
+    # Modo: Analise — compara Estado de Cuenta (CTA/Período) x Plantilla (Cuenta/Amount)
     # -------------------------------------------------------------------------
-    elif mode == "Analise":
-        st.info("📒 *Analise* — em breve conectaremos a lógica aqui.")
+    elif mode == "asientos":  # Analise
+        st.subheader("🔍 Analise: Estado de Cuenta x Plantilla de Gastos")
+        st.caption(
+            "Carregue o **Estado de Cuenta (.txt)** e a **Plantilla de Gastos (.xlsx/.xls)**. "
+            "Vamos consolidar por conta e comparar os saldos."
+        )
+
+        col_u1, col_u2 = st.columns(2)
+        with col_u1:
+            up_txt = st.file_uploader(
+                "Estado de Cuenta (.txt)", type=["txt"],
+                key="aag_analise_txt", help="Relatório 'Listado de Saldos' em texto."
+            )
+        with col_u2:
+            up_xl = st.file_uploader(
+                "Plantilla de Gastos (.xlsx/.xls)", type=["xlsx", "xls"],
+                key="aag_analise_xl", help="Primeira aba será lida."
+            )
+
+        col_run, col_clear = st.columns([2, 1])
+        with col_run:
+            run_clicked = st.button(
+                "▶️ Executar análise",
+                type="primary",
+                use_container_width=True,
+                disabled=not (up_txt and up_xl),
+            )
+        with col_clear:
+            clear_clicked = st.button("Limpar", use_container_width=True)
+
+        if clear_clicked:
+            # Reseta apenas os uploaders desta seção
+            st.session_state["aag_analise_txt"] = None
+            st.session_state["aag_analise_xl"] = None
+            st.rerun()
+
+        if run_clicked and up_txt and up_xl:
+            def _norm_conta(x) -> str:
+                """Normaliza o número da conta: deixa apenas dígitos e remove zeros à esquerda."""
+                s = re.sub(r"\D", "", str(x))
+                s = s.lstrip("0")
+                return s if s else ""
+
+            pbar = st.progress(0, text="Lendo Estado de Cuenta (.txt)...")
+
+            # -----------------------
+            # 1) Estado de Cuenta
+            # -----------------------
+            try:
+                raw = up_txt.getvalue()
+                try:
+                    text = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = raw.decode("latin-1")
+
+                df_ec = parse_estado_cuenta_txt(text)  # reaproveita seu parser
+                if df_ec is None or df_ec.empty:
+                    st.error("Estado de Cuenta sem linhas válidas.")
+                    st.stop()
+
+                # Normaliza colunas-chave
+                if "CTA" not in df_ec.columns or "Período" not in df_ec.columns:
+                    st.error("Estado de Cuenta não contém as colunas esperadas: 'CTA' e 'Período'.")
+                    st.stop()
+
+                df_ec["CTA"] = df_ec["CTA"].apply(_norm_conta)
+                df_ec["Período"] = pd.to_numeric(df_ec["Período"], errors="coerce").fillna(0.0)
+
+                # Remove linhas sem conta (ex.: totalizadores que não têm CTA)
+                df_ec = df_ec[df_ec["CTA"].astype(str).str.len() > 0]
+
+                # Agrega por conta (CTA) somando Período
+                df_ec_agg = (
+                    df_ec.groupby("CTA", as_index=False)["Período"]
+                    .sum()
+                    .rename(columns={"CTA": "Conta", "Período": "Saldo_Estado"})
+                )
+                pbar.progress(35, text="Lendo Plantilla de Gastos (.xlsx/.xls)...")
+
+            except Exception as e:
+                st.error("Erro ao processar o Estado de Cuenta.")
+                st.exception(e)
+                st.stop()
+
+            # -----------------------
+            # 2) Plantilla de Gastos
+            # -----------------------
+            try:
+                name = getattr(up_xl, "name", "").lower()
+                engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
+                df_pg = pd.read_excel(up_xl, sheet_name=0, engine=engine)
+
+                # Detecta colunas 'Cuenta' e 'Amount' (case-insensitive)
+                def _find_col(df, target):
+                    for c in df.columns:
+                        if str(c).strip().lower() == target:
+                            return c
+                    # fallback: contém
+                    cand = [c for c in df.columns if target in str(c).strip().lower()]
+                    return cand[0] if cand else None
+
+                cuenta_col = _find_col(df_pg, "cuenta")
+                amount_col = _find_col(df_pg, "amount")
+
+                if cuenta_col is None or amount_col is None:
+                    st.error("Plantilla não contém as colunas esperadas: 'Cuenta' e 'Amount'.")
+                    st.stop()
+
+                # Normaliza e soma Amount por Cuenta
+                df_pg[amount_col] = pd.to_numeric(df_pg[amount_col], errors="coerce").fillna(0.0)
+                df_pg["__conta__"] = df_pg[cuenta_col].apply(_norm_conta)
+                df_pg = df_pg[df_pg["__conta__"].astype(str).str.len() > 0]
+
+                df_pg_agg = (
+                    df_pg.groupby("__conta__", as_index=False)[amount_col]
+                    .sum()
+                    .rename(columns={"__conta__": "Conta", amount_col: "Valor_Plantilla"})
+                )
+                pbar.progress(70, text="Comparando saldos...")
+
+            except Exception as e:
+                st.error("Erro ao processar a Plantilla de Gastos.")
+                st.exception(e)
+                st.stop()
+
+            # -----------------------
+            # 3) Comparação
+            # -----------------------
+            try:
+                df_cmp = pd.merge(df_ec_agg, df_pg_agg, on="Conta", how="outer")
+                for c in ["Saldo_Estado", "Valor_Plantilla"]:
+                    df_cmp[c] = pd.to_numeric(df_cmp[c], errors="coerce").fillna(0.0)
+
+                df_cmp["Diferença"] = (df_cmp["Valor_Plantilla"] - df_cmp["Saldo_Estado"]).round(2)
+
+                # Tolerância (padrão 0,01). Ajuste se quiser.
+                tol = 0.01
+                df_cmp["Divergente?"] = df_cmp["Diferença"].abs() > tol
+
+                # Ordena por maior diferença absoluta primeiro
+                df_cmp = df_cmp.sort_values(df_cmp["Diferença"].abs(), ascending=False).reset_index(drop=True)
+
+                pbar.progress(85, text="Preparando visualização...")
+
+                # Métricas rápidas
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    st.metric("Contas (Estado)", f"{df_ec_agg['Conta'].nunique():,}".replace(",", "."))
+                with c2:
+                    st.metric(
+                        "Soma Estado",
+                        f"{df_ec_agg['Saldo_Estado'].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+                    )
+                with c3:
+                    st.metric(
+                        "Soma Plantilla",
+                        f"{df_pg_agg['Valor_Plantilla'].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+                    )
+
+                # Filtro: apenas divergentes
+                only_div = st.checkbox("Mostrar apenas contas com divergência", value=True)
+                df_show = df_cmp[df_cmp["Divergente?"]] if only_div else df_cmp
+
+                # Apresentação
+                st.dataframe(
+                    df_show[["Conta", "Saldo_Estado", "Valor_Plantilla", "Diferença", "Divergente?"]],
+                    use_container_width=True, height=520,
+                    column_config={
+                        "Saldo_Estado": st.column_config.NumberColumn(format="%.2f"),
+                        "Valor_Plantilla": st.column_config.NumberColumn(format="%.2f"),
+                        "Diferença": st.column_config.NumberColumn(format="%.2f"),
+                    },
+                )
+
+                pbar.progress(95, text="Gerando arquivos para download...")
+
+                # Downloads
+                col_d1, col_d2 = st.columns(2)
+                with col_d1:
+                    st.download_button(
+                        label="Baixar CSV (Analise)",
+                        data=df_show.to_csv(index=False).encode("utf-8"),
+                        file_name="analise_contas.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+                with col_d2:
+                    # Reaproveita helper para XLSX com máscara numérica
+                    xlsx_bytes = to_xlsx_bytes_numformat(
+                        df_show[["Conta", "Saldo_Estado", "Valor_Plantilla", "Diferença", "Divergente?"]],
+                        sheet_name="Analise",
+                        numeric_cols=["Saldo_Estado", "Valor_Plantilla", "Diferença"],
+                    )
+                    st.download_button(
+                        label="Baixar XLSX (Analise)",
+                        data=xlsx_bytes,
+                        file_name="analise_contas.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                    )
+
+                pbar.progress(100, text="Concluído.")
+
+            except Exception as e:
+                st.error("Erro durante a comparação.")
+                st.exception(e)
