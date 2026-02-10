@@ -414,7 +414,7 @@ def render():
             df_ec_agg = (
                 df_ec_proc.groupby("CTA", as_index=False)["Período"]
                 .sum()
-                .rename(columns={"CTA": "Conta", "Período": "Saldo_Estado_Cuenta"})
+                .rename(columns={"CTA": "Cuenta", "Período": "Saldo_Estado_Cuenta"})
             )
 
             pbar.progress(40, text="Consolidando Plantilla de Gastos...")
@@ -450,7 +450,7 @@ def render():
             df_pg_agg = (
                 df_pg_proc.groupby("__conta__", as_index=False)[amount_col]
                 .sum()
-                .rename(columns={"__conta__": "Conta", amount_col: "Saldo_Plantilla_Gastos"})
+                .rename(columns={"__conta__": "Cuenta", amount_col: "Saldo_Plantilla_Gastos"})
             )
 
             pbar.progress(70, text="Comparando saldos...")
@@ -463,24 +463,25 @@ def render():
         # 3) Comparação
         # -----------------------
         try:
-            df_cmp = pd.merge(df_ec_agg, df_pg_agg, on="Conta", how="outer")
+            df_cmp = pd.merge(df_ec_agg, df_pg_agg, on="Cuenta", how="outer")
             for c in ["Saldo_Estado_Cuenta", "Saldo_Plantilla_Gastos"]:
                 df_cmp[c] = pd.to_numeric(df_cmp[c], errors="coerce").fillna(0.0)
 
             df_cmp["Diferença"] = (df_cmp["Saldo_Plantilla_Gastos"] - df_cmp["Saldo_Estado_Cuenta"]).round(2)
 
-            # Divergente? (usada apenas para filtro, não exibida)
+            # Flag só para filtro (não exibida)
             df_cmp["_div"] = df_cmp["Diferença"].abs() > float(tol)
 
-            # Ordenação por maior diferença (abs)
-            df_cmp = df_cmp.sort_values(by="Diferença", key=lambda s: s.abs(), ascending=False).reset_index(drop=True)
+            # ✅ Ordenação pedida: do menor para o maior por Cuenta (ordem numérica)
+            df_cmp["_cuenta_num"] = pd.to_numeric(df_cmp["Cuenta"], errors="coerce")
+            df_cmp = df_cmp.sort_values(by="_cuenta_num", ascending=True).drop(columns=["_cuenta_num"]).reset_index(drop=True)
 
             pbar.progress(90, text="Preparando visualização...")
 
-            # Métricas rápidas (rótulos atualizados)
+            # Métricas (rótulos atualizados)
             c1, c2, c3 = st.columns(3)
             with c1:
-                st.metric("Contas (Estado)", f"{df_ec_agg['Conta'].nunique():,}".replace(",", "."))
+                st.metric("Contas (Estado)", f"{df_ec_agg['Cuenta'].nunique():,}".replace(",", "."))
             with c2:
                 st.metric(
                     "Soma Estado de Cuentas",
@@ -496,10 +497,9 @@ def render():
             only_div = st.checkbox("Mostrar apenas contas com divergência", value=True)
             df_show = df_cmp[df_cmp["_div"]] if only_div else df_cmp
 
-            # Não exibir a coluna de controle "_div"
-            df_show = df_show[["Conta", "Saldo_Estado_Cuenta", "Saldo_Plantilla_Gastos", "Diferença"]]
+            # Exibição sem coluna de controle
+            df_show = df_show[["Cuenta", "Saldo_Estado_Cuenta", "Saldo_Plantilla_Gastos", "Diferença"]]
 
-            # Apresentação
             st.dataframe(
                 df_show,
                 use_container_width=True, height=520,
@@ -512,7 +512,7 @@ def render():
 
             pbar.progress(95, text="Gerando arquivos para download...")
 
-            # Downloads
+            # Downloads (já ordenados pela Cuenta)
             col_d1, col_d2 = st.columns(2)
             with col_d1:
                 st.download_button(
