@@ -246,6 +246,146 @@ def _select_action(action_key: str):
     st.session_state.acao_selecionada = action_key
     st.session_state.uploader_key = f"uploader_{action_key}"
 
+# ================== NOVOS HELPERS (PRN) ==================
+import math
+
+def _to_str(x):
+    """Converte para str, mantendo vazio em None/NaN."""
+    if x is None:
+        return ""
+    if isinstance(x, float) and math.isnan(x):
+        return ""
+    s = str(x)
+    return "" if s.strip() in {"nan", "NaN"} else s
+
+def _fixed_width_line(values, widths):
+    """
+    Monta uma linha em largura fixa (padding à direita com espaço).
+    - values: lista de strings
+    - widths: lista de inteiros, mesma qtde que values
+    """
+    out = []
+    for v, w in zip(values, widths):
+        s = _to_str(v)
+        # Excel salva como texto: truncamos se exceder e preenchemos com espaços
+        s = s[:w]
+        out.append(s + (" " * max(0, w - len(s))))
+    return "".join(out)
+
+def _df_to_prn_bytes(rows_values, widths, encoding="cp1252"):
+    """
+    Converte uma lista de 'values por linha' num PRN de largura fixa.
+    Retorna bytes (para usar no st.download_button).
+    """
+    lines = [_fixed_width_line(vals, widths) for vals in rows_values]
+    # Usamos CRLF como geralmente o Excel (Text Printer) gera.
+    text = "\r\n".join(lines) + "\r\n"
+    return text.encode(encoding, errors="replace")
+
+# ------------------- EXTERNOS: 1ª ABA (equivalente Carga_Financeira) -------------------
+def gerar_externos_prn_primeira_aba(xls_file):
+    """
+    Lê a 1ª aba do arquivo Excel e produz 'Externos.prn' replicando a macro Carga_Financeira:
+      - pega linhas 3..1500 pulando de 4 em 4
+      - se coluna C (3) não vazia, copia colunas C..Z (3..26) -> 24 colunas
+      - aplica larguras A..X conforme a macro
+    """
+    # Detecta engine pelo sufixo (Streamlit fornece name no objeto)
+    name = getattr(xls_file, "name", "").lower()
+    engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
+
+    # Importante: dtype=str para preservar o que vir como texto
+    df = pd.read_excel(xls_file, sheet_name=0, header=0, dtype=str, engine=engine)
+
+    # Função para obter o "valor de célula Excel" linha r/col c (Excel 1-based; df usa 0-based e 1ª linha é cabeçalho)
+    def get_cell(r, c):
+        row_idx = r - 2   # Excel r=2 -> df.iloc[0]
+        col_idx = c - 1
+        try:
+            # Se a coluna não existir (por cabeçalho curto), tenta por posição
+            if 0 <= row_idx < len(df.index) and 0 <= col_idx < len(df.columns):
+                return df.iloc[row_idx, col_idx]
+        except Exception:
+            return ""
+        return ""
+
+    # Larguras A..X (24 colunas), exatamente como na tua macro
+    widths = [10, 25, 6, 6, 6, 16, 16, 2, 5, 16, 3, 2, 30, 6, 3, 3, 8, 3, 6, 4, 16, 16, 3, 6]
+
+    rows_values = []
+    for r in range(3, 1501, 4):  # 3 até 1500 pulando de 4
+        val_c = _to_str(get_cell(r, 3))  # coluna C
+        if val_c != "":
+            # Copia C..Z (3..26) -> 24 colunas
+            row_vals = [get_cell(r, c) for c in range(3, 27)]
+            rows_values.append(row_vals)
+
+    prn_bytes = _df_to_prn_bytes(rows_values, widths, encoding="cp1252")
+    return prn_bytes  # para "Externos.prn"
+
+# ------------------- EXTERNOS: 2ª ABA (equivalente Carga_Contabil) -------------------
+def gerar_externos_prn_segunda_aba(xls_file):
+    """
+    Lê a 2ª aba do arquivo Excel e produz 'aexternos.prn' replicando Carga_Contabil:
+      - acha linhaLimite: primeira linha, a partir de B2, onde B é erro (#N/A). No pandas, tratamos NaN como quebra.
+        -> linhaLimite = (linhaErro - 4); se não achar, usa 1496
+      - copia intervalo B2:N(linhaLimite) -> 13 colunas
+      - larguras: A..M = [6,3,3,8,3,16,16,2,30,6,15,20,5]
+      - regras:
+          D == 0 -> limpar (ficar "")
+          F vazio ou 0 -> remover linha
+    """
+    name = getattr(xls_file, "name", "").lower()
+    engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
+    df2 = pd.read_excel(xls_file, sheet_name=1, header=0, dtype=str, engine=engine)
+
+    # Acessar célula Excel 1-based
+    def get_cell2(r, c):
+        row_idx = r - 2
+        col_idx = c - 1
+        try:
+            if 0 <= row_idx < len(df2.index) and 0 <= col_idx < len(df2.columns):
+                return df2.iloc[row_idx, col_idx]
+        except Exception:
+            return ""
+        return ""
+
+    # 1) Encontrar linhaLimite
+    linha_limite = 0
+    for r in range(2, 46001):  # B2..B46000
+        val_b = get_cell2(r, 2)  # coluna B
+        # Em pandas, #N/A geralmente vira NaN; mas, por robustez, tratamos strings "#N/A" também
+        if (val_b is None) or (str(val_b).strip() in {"#N/A", "#N/D"}) or (pd.isna(val_b)):
+            linha_limite = r - 4
+            break
+    if linha_limite <= 0:
+        linha_limite = 1496
+
+    # 2) Copiar B2:N(linha_limite)
+    rows_raw = []
+    for r in range(2, max(2, linha_limite) + 1):
+        row_vals = [get_cell2(r, c) for c in range(2, 15)]  # 2..14 (B..N) => 13 colunas
+        rows_raw.append(row_vals)
+
+    # 3) Regras sobre as colunas:
+    #    D = idx 3 (0-based), F = idx 5 (0-based) no array rows_raw
+    rows_clean = []
+    for vals in rows_raw:
+        # limpar D se 0
+        d_val = _to_str(vals[3])
+        if d_val.strip() in {"0", "0.0"}:
+            vals[3] = ""
+        # se F vazio/0, descartar linha
+        f_val = _to_str(vals[5]).strip()
+        if f_val in {"", "0", "0.0"}:
+            continue
+        rows_clean.append(vals)
+
+    # 4) Larguras A..M (13 colunas), como na tua macro
+    widths2 = [6, 3, 3, 8, 3, 16, 16, 2, 30, 6, 15, 20, 5]
+    prn_bytes = _df_to_prn_bytes(rows_clean, widths2, encoding="cp1252")
+    return prn_bytes  # para "aexternos.prn"
+# ================== FIM HELPERS (PRN) ==================
 # -----------------------------
 # Página
 # -----------------------------
@@ -581,3 +721,70 @@ def render():
 
     with tab4:
         downloads_page.render()
+    
+    with tab5:
+    st.subheader("🗎 Transformar .prn")
+    st.caption("Selecione um fluxo abaixo e carregue o Excel (primeira aba = Carga Financeira, segunda aba = Carga Contábil).")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        btn_duas = st.button("Duas", use_container_width=True)
+    with c2:
+        btn_externos = st.button("Externos", use_container_width=True)
+    with c3:
+        btn_gastos = st.button("Gastos Adicionales", use_container_width=True)
+
+    st.divider()
+
+    # -------------------- FLUXO EXTERNOS (implementado) --------------------
+    if btn_externos:
+        st.info("Fluxo **Externos** selecionado. Carregue o arquivo Excel.")
+        uploaded_xl = st.file_uploader(
+            "Carregar Excel (.xlsx ou .xls) para gerar PRN",
+            type=["xlsx", "xls"],
+            key="prn_externos_upl",
+            accept_multiple_files=False,
+            help="A 1ª aba será usada para 'Externos.prn' (Carga_Financeira) e a 2ª para 'aexternos.prn' (Carga_Contabil)."
+        )
+        if uploaded_xl:
+            colg1, colg2 = st.columns(2)
+            with colg1:
+                if st.button("Gerar Externos.prn", type="primary", use_container_width=True):
+                    try:
+                        prn_bytes = gerar_externos_prn_primeira_aba(uploaded_xl)
+                        st.success("Arquivo **Externos.prn** gerado!")
+                        st.download_button(
+                            "Baixar Externos.prn",
+                            data=prn_bytes,
+                            file_name="Externos.prn",
+                            mime="text/plain",
+                            use_container_width=True
+                        )
+                    except Exception as e:
+                        st.error("Falha ao gerar Externos.prn")
+                        st.exception(e)
+            with colg2:
+                if st.button("Gerar aexternos.prn", type="secondary", use_container_width=True):
+                    try:
+                        prn_bytes2 = gerar_externos_prn_segunda_aba(uploaded_xl)
+                        st.success("Arquivo **aexternos.prn** gerado!")
+                        st.download_button(
+                            "Baixar aexternos.prn",
+                            data=prn_bytes2,
+                            file_name="aexternos.prn",
+                            mime="text/plain",
+                            use_container_width=True
+                        )
+                    except Exception as e:
+                        st.error("Falha ao gerar aexternos.prn")
+                        st.exception(e)
+
+    # -------------------- FLUXO DUAS (placeholder) --------------------
+    if btn_duas:
+        st.info("Fluxo **Duas** selecionado. (Em breve: lógica específica para gerar PRN a partir do Excel.)")
+        st.caption("Se quiser, já me passe a macro/algoritmo e eu programo aqui.")
+
+    # -------------------- FLUXO GASTOS ADICIONALES (placeholder) --------------------
+    if btn_gastos:
+        st.info("Fluxo **Gastos Adicionales** selecionado. (Em breve: lógica específica para gerar PRN a partir do Excel.)")
+        st.caption("Me envie a macro/algoritmo e implemento igual fiz no Externos.")
