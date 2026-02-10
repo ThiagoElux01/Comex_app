@@ -742,28 +742,42 @@ def render():
     with tab5:
         st.subheader("📝 Transformar .prn")
         st.caption("Selecione um fluxo abaixo e carregue o Excel (primeira aba = Carga Financeira, segunda aba = Carga Contábil).")
+
+        # ---------- ESTADO PERSISTENTE DO FLUXO PRN ----------
+        if "prn_flow" not in st.session_state:
+            st.session_state.prn_flow = None  # valores possíveis: "externos", "duas", "gastos"
+
         c1, c2, c3 = st.columns(3)
         with c1:
-            btn_duas = st.button("Duas", key="prn_duas_select", use_container_width=True)
+            if st.button("Duas", key="prn_duas_select", use_container_width=True):
+                st.session_state.prn_flow = "duas"
         with c2:
-            btn_externos = st.button("Externos", key="prn_externos_select", use_container_width=True)
+            if st.button("Externos", key="prn_externos_select", use_container_width=True):
+                st.session_state.prn_flow = "externos"
         with c3:
-            btn_gastos = st.button("Gastos Adicionales", key="prn_gastos_select", use_container_width=True)
+            if st.button("Gastos Adicionales", key="prn_gastos_select", use_container_width=True):
+                st.session_state.prn_flow = "gastos"
 
         st.divider()
 
+        # ---------- MOSTRA O BLOCO CONFORME O FLUXO SELECIONADO ----------
+        flow = st.session_state.prn_flow
+
         # -------------------- FLUXO EXTERNOS (implementado) --------------------
-        if btn_externos:
+        if flow == "externos":
             st.info("Fluxo **Externos** selecionado. Carregue o arquivo Excel.")
             uploaded_xl = st.file_uploader(
                 "Carregar Excel (.xlsx ou .xls) para gerar PRN",
                 type=["xlsx", "xls"],
-                key="prn_externos_upl",
+                key="prn_externos_upl",              # chave estável
                 accept_multiple_files=False,
                 help="A 1ª aba será usada para 'Externos.prn' (Carga_Financeira) e a 2ª para 'aexternos.prn' (Carga_Contabil)."
             )
-            if uploaded_xl:
+
+            # Só renderiza os botões de geração quando já há arquivo carregado
+            if uploaded_xl is not None:
                 colg1, colg2 = st.columns(2)
+
                 with colg1:
                     if st.button("Gerar Externos.prn", key="gen_externos_prn1", type="primary", use_container_width=True):
                         try:
@@ -780,6 +794,7 @@ def render():
                         except Exception as e:
                             st.error("Falha ao gerar Externos.prn")
                             st.exception(e)
+
                 with colg2:
                     if st.button("Gerar aexternos.prn", key="gen_externos_prn2", type="secondary", use_container_width=True):
                         try:
@@ -798,11 +813,11 @@ def render():
                             st.exception(e)
 
         # -------------------- FLUXO DUAS (placeholder) --------------------
-        if btn_duas:
+        elif flow == "duas":
             st.info("Fluxo **Duas** selecionado. (Em breve: lógica específica para gerar PRN a partir do Excel.)")
             st.caption("Se quiser, já me passe a macro/algoritmo e eu programo aqui.")
 
         # -------------------- FLUXO GASTOS ADICIONALES (placeholder) --------------------
-        if btn_gastos:
+        elif flow == "gastos":
             st.info("Fluxo **Gastos Adicionales** selecionado. (Em breve: lógica específica para gerar PRN a partir do Excel.)")
             st.caption("Me envie a macro/algoritmo e implemento igual fiz no Externos.")
