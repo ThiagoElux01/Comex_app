@@ -151,6 +151,7 @@ def header_paint(ws):
         "CDA",
         "Monto",
         "COD MONEDA",
+        "Lineaabajo",
     }
     # Percorre somente a linha 1 (cabeçalho)
     for cell in ws[1]:
