@@ -166,7 +166,6 @@ def render():
         if st.button("Plantilla Gastos", use_container_width=True):
             _set_mode("plantilla")
     with col_b3:
-        # RÓTULO ATUALIZADO
         if st.button("Analise", use_container_width=True):
             _set_mode("asientos")
 
@@ -174,10 +173,9 @@ def render():
     st.divider()
 
     # -------------------------------------------------------------------------
-    # Modo: Estado de Cuenta (.txt) — com totalizador (sem Styler)
+    # Modo: Estado de Cuenta (.txt)
     # -------------------------------------------------------------------------
     if mode == "estado":
-        # Garante que a key do uploader exista
         upl_key_estado = st.session_state["aag_state"].setdefault("uploader_key_estado", "aag_estado_upl_1")
 
         st.caption("Carregue o arquivo **.txt** de *Listado de Saldos* para visualização e export.")
@@ -196,9 +194,7 @@ def render():
             clear_clicked = st.button("Limpar", use_container_width=True)
 
         if clear_clicked:
-            # Força reset do uploader
             st.session_state["aag_state"]["uploader_key_estado"] = upl_key_estado + "_x"
-            # Limpa cache da análise baseada neste dataset
             if "aag_estado_df" in st.session_state:
                 del st.session_state["aag_estado_df"]
             st.rerun()
@@ -207,14 +203,13 @@ def render():
             pbar = st.progress(0, text="Lendo arquivo .txt...")
             try:
                 raw_bytes = uploaded.getvalue()
-                # Decodificação robusta (UTF-8 -> Latin-1 fallback)
                 try:
                     text = raw_bytes.decode("utf-8")
                 except UnicodeDecodeError:
                     text = raw_bytes.decode("latin-1")
 
                 pbar.progress(35, text="Convertendo para DataFrame...")
-                df_base = parse_estado_cuenta_txt(text)  # (reuso)  [1](https://electrolux-my.sharepoint.com/personal/thiago_farias_electrolux_com/Documents/Microsoft%20Copilot%20Chat%20Files/app_archivo_gastos.py)
+                df_base = parse_estado_cuenta_txt(text)
 
                 if df_base is None or df_base.empty:
                     st.warning("Nenhuma linha válida encontrada no arquivo.")
@@ -224,7 +219,7 @@ def render():
                 # Salva o DF base (sem a linha TOTAL) para uso na aba Analise
                 st.session_state["aag_estado_df"] = df_base.copy()
 
-                # ======== LINHA TOTAL (mantendo dtype numérico) ========
+                # ======== LINHA TOTAL ========
                 df = df_base.copy()
                 numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
                 for c in numeric_cols:
@@ -236,7 +231,6 @@ def render():
                     total_row[c] = totals[c]
                 df = pd.concat([df, pd.DataFrame([total_row], columns=df.columns)], ignore_index=True)
 
-                # ======== VISUAL: formatação com column_config (sem Styler) ========
                 pbar.progress(70, text="Preparando visualização...")
                 st.success("Arquivo processado com sucesso.")
                 st.dataframe(
@@ -259,7 +253,7 @@ def render():
                         use_container_width=True,
                     )
                 with col_xlsx:
-                    xlsx_bytes = to_xlsx_bytes_numformat(  # (reuso)  [1](https://electrolux-my.sharepoint.com/personal/thiago_farias_electrolux_com/Documents/Microsoft%20Copilot%20Chat%20Files/app_archivo_gastos.py)
+                    xlsx_bytes = to_xlsx_bytes_numformat(
                         df, sheet_name="EstadoCuenta", numeric_cols=numeric_cols
                     )
                     st.download_button(
@@ -276,7 +270,7 @@ def render():
                 st.exception(e)
 
     # -------------------------------------------------------------------------
-    # Modo: Plantilla de Gastos (.xlsx/.xls) — SEM totalizador (sem Styler)
+    # Modo: Plantilla de Gastos (.xlsx/.xls)
     # -------------------------------------------------------------------------
     elif mode == "plantilla":
         upl_key_pg = st.session_state["aag_state"].setdefault("uploader_key_pg", "aag_pg_upl_1")
@@ -298,7 +292,6 @@ def render():
 
         if clear_clicked:
             st.session_state["aag_state"]["uploader_key_pg"] = upl_key_pg + "_x"
-            # Limpa cache da análise baseada neste dataset
             if "aag_plantilla_df" in st.session_state:
                 del st.session_state["aag_plantilla_df"]
             st.rerun()
@@ -331,7 +324,6 @@ def render():
                 # Salva o DF para uso na aba Analise
                 st.session_state["aag_plantilla_df"] = df_pg.copy()
 
-                # VISUAL: apenas Amount com 2 casas (sem milhar no componente)
                 pbar.progress(70, text="Preparando visualização...")
                 st.success("Arquivo carregado com sucesso.")
                 st.dataframe(
@@ -354,7 +346,7 @@ def render():
                         use_container_width=True,
                     )
                 with col_xlsx:
-                    xlsx_bytes = to_xlsx_bytes_numformat(  # (reuso)  [1](https://electrolux-my.sharepoint.com/personal/thiago_farias_electrolux_com/Documents/Microsoft%20Copilot%20Chat%20Files/app_archivo_gastos.py)
+                    xlsx_bytes = to_xlsx_bytes_numformat(
                         df_pg, sheet_name="PlantillaGastos", numeric_cols=[amount_col]
                     )
                     st.download_button(
@@ -375,9 +367,6 @@ def render():
     # -------------------------------------------------------------------------
     elif mode == "asientos":  # Analise
         st.subheader("🔍 Analise: Estado de Cuenta x Plantilla de Gastos")
-        st.caption(
-            "Este modo usa os **dados já carregados** nas abas *Estado de Cuenta* e *Plantilla Gastos*."
-        )
 
         # Recupera datasets da sessão
         df_ec = st.session_state.get("aag_estado_df", None)       # Estado de Cuenta (sem linha TOTAL)
@@ -397,8 +386,8 @@ def render():
             )
             return
 
-        # Parâmetros
-        tol = st.number_input("Tolerância (|Diferença| > tolerância ⇒ divergente)", min_value=0.00, value=0.01, step=0.01)
+        # Parâmetros (rótulo atualizado)
+        tol = st.number_input("Valor de Tolerância", min_value=0.00, value=0.01, step=0.01)
 
         # Helpers
         def _norm_conta(x) -> str:
@@ -425,7 +414,7 @@ def render():
             df_ec_agg = (
                 df_ec_proc.groupby("CTA", as_index=False)["Período"]
                 .sum()
-                .rename(columns={"CTA": "Conta", "Período": "Saldo_Estado"})
+                .rename(columns={"CTA": "Conta", "Período": "Saldo_Estado_Cuenta"})
             )
 
             pbar.progress(40, text="Consolidando Plantilla de Gastos...")
@@ -461,7 +450,7 @@ def render():
             df_pg_agg = (
                 df_pg_proc.groupby("__conta__", as_index=False)[amount_col]
                 .sum()
-                .rename(columns={"__conta__": "Conta", amount_col: "Valor_Plantilla"})
+                .rename(columns={"__conta__": "Conta", amount_col: "Saldo_Plantilla_Gastos"})
             )
 
             pbar.progress(70, text="Comparando saldos...")
@@ -475,43 +464,48 @@ def render():
         # -----------------------
         try:
             df_cmp = pd.merge(df_ec_agg, df_pg_agg, on="Conta", how="outer")
-            for c in ["Saldo_Estado", "Valor_Plantilla"]:
+            for c in ["Saldo_Estado_Cuenta", "Saldo_Plantilla_Gastos"]:
                 df_cmp[c] = pd.to_numeric(df_cmp[c], errors="coerce").fillna(0.0)
 
-            df_cmp["Diferença"] = (df_cmp["Valor_Plantilla"] - df_cmp["Saldo_Estado"]).round(2)
-            df_cmp["Divergente?"] = df_cmp["Diferença"].abs() > float(tol)
+            df_cmp["Diferença"] = (df_cmp["Saldo_Plantilla_Gastos"] - df_cmp["Saldo_Estado_Cuenta"]).round(2)
 
-            # ✅ Corrige o KeyError: usar 'by="Diferença"' e 'key=lambda s: s.abs()'
+            # Divergente? (usada apenas para filtro, não exibida)
+            df_cmp["_div"] = df_cmp["Diferença"].abs() > float(tol)
+
+            # Ordenação por maior diferença (abs)
             df_cmp = df_cmp.sort_values(by="Diferença", key=lambda s: s.abs(), ascending=False).reset_index(drop=True)
 
             pbar.progress(90, text="Preparando visualização...")
 
-            # Métricas rápidas
+            # Métricas rápidas (rótulos atualizados)
             c1, c2, c3 = st.columns(3)
             with c1:
                 st.metric("Contas (Estado)", f"{df_ec_agg['Conta'].nunique():,}".replace(",", "."))
             with c2:
                 st.metric(
-                    "Soma Estado",
-                    f"{df_ec_agg['Saldo_Estado'].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+                    "Soma Estado de Cuentas",
+                    f"{df_ec_agg['Saldo_Estado_Cuenta'].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
                 )
             with c3:
                 st.metric(
-                    "Soma Plantilla",
-                    f"{df_pg_agg['Valor_Plantilla'].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+                    "Soma Plantilla de Gastos",
+                    f"{df_pg_agg['Saldo_Plantilla_Gastos'].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
                 )
 
             # Filtro: apenas divergentes
             only_div = st.checkbox("Mostrar apenas contas com divergência", value=True)
-            df_show = df_cmp[df_cmp["Divergente?"]] if only_div else df_cmp
+            df_show = df_cmp[df_cmp["_div"]] if only_div else df_cmp
+
+            # Não exibir a coluna de controle "_div"
+            df_show = df_show[["Conta", "Saldo_Estado_Cuenta", "Saldo_Plantilla_Gastos", "Diferença"]]
 
             # Apresentação
             st.dataframe(
-                df_show[["Conta", "Saldo_Estado", "Valor_Plantilla", "Diferença", "Divergente?"]],
+                df_show,
                 use_container_width=True, height=520,
                 column_config={
-                    "Saldo_Estado": st.column_config.NumberColumn(format="%.2f"),
-                    "Valor_Plantilla": st.column_config.NumberColumn(format="%.2f"),
+                    "Saldo_Estado_Cuenta": st.column_config.NumberColumn(format="%.2f"),
+                    "Saldo_Plantilla_Gastos": st.column_config.NumberColumn(format="%.2f"),
                     "Diferença": st.column_config.NumberColumn(format="%.2f"),
                 },
             )
@@ -529,10 +523,10 @@ def render():
                     use_container_width=True,
                 )
             with col_d2:
-                xlsx_bytes = to_xlsx_bytes_numformat(   # (reuso)  [1](https://electrolux-my.sharepoint.com/personal/thiago_farias_electrolux_com/Documents/Microsoft%20Copilot%20Chat%20Files/app_archivo_gastos.py)
-                    df_show[["Conta", "Saldo_Estado", "Valor_Plantilla", "Diferença", "Divergente?"]],
+                xlsx_bytes = to_xlsx_bytes_numformat(
+                    df_show,
                     sheet_name="Analise",
-                    numeric_cols=["Saldo_Estado", "Valor_Plantilla", "Diferença"],
+                    numeric_cols=["Saldo_Estado_Cuenta", "Saldo_Plantilla_Gastos", "Diferença"],
                 )
                 st.download_button(
                     label="Baixar XLSX (Analise)",
