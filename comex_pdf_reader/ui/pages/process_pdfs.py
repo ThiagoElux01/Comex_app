@@ -258,6 +258,30 @@ def _to_str(x):
     s = str(x)
     return "" if s.strip() in {"nan", "NaN"} else s
 
+# >>> ADIÇÃO: sanitizador e sets de colunas com "máximo 2 dígitos"
+import re
+
+def _force_max_two_digits(val: str) -> str:
+    """
+    Se for estritamente numérico, limita a 2 dígitos (mantém os 2 primeiros).
+    Ex.: '202612' -> '20'. Strings vazias continuam vazias.
+    """
+    if val is None:
+        return ""
+    s = str(val).strip()
+    if s == "":
+        return ""
+    if re.fullmatch(r"\d+", s):
+        return s[:2]  # se preferir os 2 últimos, troque para s[-2:]
+    return s
+
+# 1ª aba (C..Z -> 24 colunas, índices 0..23): H, I, W, X
+TWO_DIGIT_COLS_PRIMEIRA_ABA = {5, 6, 20, 21}
+
+# 2ª aba (B..N -> 13 colunas, índices 0..12): G
+TWO_DIGIT_COLS_SEGUNDA_ABA = {5}
+
+
 def _fixed_width_line(values, widths):
     """
     Monta uma linha em largura fixa (padding à direita com espaço).
@@ -320,6 +344,16 @@ def gerar_externos_prn_primeira_aba(xls_file):
             row_vals = [get_cell(r, c) for c in range(3, 27)]
             rows_values.append(row_vals)
 
+            # >>> APLICA LIMITE '2 DÍGITOS' nas colunas H, I, W, X (índices 5,6,20,21)
+            for idx in TWO_DIGIT_COLS_PRIMEIRA_ABA:
+                if 0 <= idx < len(row_vals):
+                    row_vals[idx] = _force_max_two_digits(_to_str(row_vals[idx]))
+
+            # >>> APLICA LIMITE '2 DÍGITOS' nas colunas H, I, W, X (índices 5,6,20,21)
+            for idx in TWO_DIGIT_COLS_PRIMEIRA_ABA:
+                if 0 <= idx < len(row_vals):
+                    row_vals[idx] = _force_max_two_digits(_to_str(row_vals[idx]))
+
     prn_bytes = _df_to_prn_bytes(rows_values, widths, encoding="cp1252")
     return prn_bytes  # para "Externos.prn"
 
@@ -365,6 +399,11 @@ def gerar_externos_prn_segunda_aba(xls_file):
     rows_raw = []
     for r in range(2, max(2, linha_limite) + 1):
         row_vals = [get_cell2(r, c) for c in range(2, 15)]  # 2..14 (B..N) => 13 colunas
+
+        # >>> APLICA LIMITE '2 DÍGITOS' na coluna G (índice 5)
+        for idx in TWO_DIGIT_COLS_SEGUNDA_ABA:
+            if 0 <= idx < len(row_vals):
+                row_vals[idx] = _force_max_two_digits(_to_str(row_vals[idx]))
         rows_raw.append(row_vals)
 
     # 3) Regras sobre as colunas:
@@ -418,6 +457,11 @@ def gerar_adicionales_prn_primeira_aba(xls_file):
         val_c = _to_str(get_cell(r, 3))  # coluna C
         if val_c != "":
             row_vals = [get_cell(r, c) for c in range(3, 27)]  # C..Z
+
+            # >>> APLICA LIMITE '2 DÍGITOS' nas colunas H, I, W, X (índices 5,6,20,21)
+            for idx in TWO_DIGIT_COLS_PRIMEIRA_ABA:
+                if 0 <= idx < len(row_vals):
+                    row_vals[idx] = _force_max_two_digits(_to_str(row_vals[idx]))
             rows_values.append(row_vals)
 
     # PRN único (todas as linhas)
