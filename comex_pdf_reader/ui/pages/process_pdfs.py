@@ -249,25 +249,46 @@ def _select_action(action_key: str):
 # ================== NOVOS HELPERS (PRN) ==================
 import math
 
+# --- SUBSTITUA estas duas funções em ui/pages/process_pdfs.py ---
+
+import re
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+
+_num_token = re.compile(r'^\s*[-+]?\d+(?:\.\d+)?\s*$')
+
 def _to_str(x):
-    """Converte para str, mantendo vazio em None/NaN."""
+    """
+    Converte valor para string:
+    - None/NaN -> ""
+    - numérico -> 2 casas decimais com ponto (ROUND_HALF_UP)
+    - demais -> str(x) preservando
+    """
     if x is None:
         return ""
-    if isinstance(x, float) and math.isnan(x):
+    s = str(x).strip()
+    if s.lower() in {"nan", "none"}:
         return ""
-    s = str(x)
-    return "" if s.strip() in {"nan", "NaN"} else s
+
+    # Detecta números "parecidos com float" (inclui casos já-string tipo "317.659999999999")
+    if _num_token.match(s):
+        try:
+            q = Decimal(s).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            # Remove .00 quando quiser sem casas? -> se preferir sempre 2 casas, mantenha:
+            return f"{q:.2f}"
+        except (InvalidOperation, ValueError):
+            # Se não der para converter, devolve como está
+            return s
+    return s
 
 def _fixed_width_line(values, widths):
     """
-    Monta uma linha em largura fixa (padding à direita com espaço).
-    - values: lista de strings
-    - widths: lista de inteiros, mesma qtde que values
+    Monta uma linha em largura fixa, formatando números com 2 casas
+    e preenchendo com espaços à direita.
     """
     out = []
     for v, w in zip(values, widths):
         s = _to_str(v)
-        # Excel salva como texto: truncamos se exceder e preenchemos com espaços
+        # Garante truncamento e padding à direita
         s = s[:w]
         out.append(s + (" " * max(0, w - len(s))))
     return "".join(out)
