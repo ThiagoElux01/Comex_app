@@ -12,6 +12,7 @@ try:
 except Exception as e:
     ADICIONALES_AVAILABLE = False
     ADICIONALES_ERR = e
+
 if not ADICIONALES_AVAILABLE:
     st.warning(
         "Módulo **Gastos Adicionales** não pôde ser carregado. "
@@ -31,6 +32,7 @@ try:
 except Exception as e:
     PERC_AVAILABLE = False
     PERC_ERR = e
+
 if not PERC_AVAILABLE:
     st.warning(
         "Módulo **Percepciones** não pôde ser carregado. "
@@ -65,6 +67,7 @@ try:
 except Exception as e:
     EXTERNOS_AVAILABLE = False
     EXTERNOS_ERR = e
+
 if not EXTERNOS_AVAILABLE:
     st.warning(
         "Módulo **Externos** não pôde ser carregado. "
@@ -79,7 +82,7 @@ if not EXTERNOS_AVAILABLE:
 from io import BytesIO
 import pandas as pd
 
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # INCLUSÃO: utilitário para ajustar largura ("autofit") das colunas no Excel
 from openpyxl.utils import get_column_letter
 
@@ -153,6 +156,7 @@ def header_paint(ws):
         "COD MONEDA",
         "Lineaabajo",
     }
+
     # Percorre somente a linha 1 (cabeçalho)
     for cell in ws[1]:
         if cell.value is None:
@@ -161,7 +165,6 @@ def header_paint(ws):
         if header_text in exact_headers:
             cell.fill = fill_blue
             cell.font = font_white_bold
-
 
 def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Tasa") -> bytes:
     buffer = BytesIO()
@@ -183,14 +186,12 @@ def df_with_blank_spacers(df: pd.DataFrame, blank_rows: int = 3) -> pd.DataFrame
     """
     if df is None or df.empty:
         return df.copy()
-
     blocks = []
     blank = pd.DataFrame([[None] * len(df.columns)], columns=df.columns)
     for _, row in df.iterrows():
         blocks.append(pd.DataFrame([row.values], columns=df.columns))
         for _ in range(blank_rows):
             blocks.append(blank.copy())
-
     out = pd.concat(blocks, ignore_index=True)
     return out
 
@@ -205,8 +206,8 @@ def to_xlsx_bytes_externos_duas_abas(
 ) -> bytes:
     """
     Cria um XLSX com:
-      - Aba 1: dados originais de 'Externos'
-      - Aba 2: os mesmos dados, mas com 3 linhas em branco abaixo de cada registro
+    - Aba 1: dados originais de 'Externos'
+    - Aba 2: os mesmos dados, mas com 3 linhas em branco abaixo de cada registro
     Aplica auto-ajuste e pintura do cabeçalho em ambas as abas.
     """
     buffer = BytesIO()
@@ -223,7 +224,6 @@ def to_xlsx_bytes_externos_duas_abas(
         ws2 = writer.book[sheet_spaced]
         _autofit_worksheet(ws2)
         header_paint(ws2)
-
     buffer.seek(0)
     return buffer.getvalue()
 
@@ -267,9 +267,6 @@ def _fixed_width_line(values, widths):
     out = []
     for v, w in zip(values, widths):
         s = _to_str(v)
-        # Se parecer número, formata com no MÁXIMO 2 casas decimais (ROUND_HALF_UP)
-        if _looks_like_number(s):
-            s = _format_two_decimals_max(s)
         # Excel salva como texto: truncamos se exceder e preenchemos com espaços
         s = s[:w]
         out.append(s + (" " * max(0, w - len(s))))
@@ -285,65 +282,13 @@ def _df_to_prn_bytes(rows_values, widths, encoding="cp1252"):
     text = "\r\n".join(lines) + "\r\n"
     return text.encode(encoding, errors="replace")
 
-
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-import re
-
-_NUMERIC_LIKE_RE = re.compile(r"^[+-]?\d[\d,\.]*$")
-
-def _looks_like_number(s: str) -> bool:
-    if s is None:
-        return False
-    s = str(s).strip()
-    if s == "":
-        return False
-    return bool(_NUMERIC_LIKE_RE.match(s))
-
-def _format_two_decimals_max(s: str) -> str:
-    """
-    Normaliza números para, no MÁXIMO, 2 casas decimais (ROUND_HALF_UP),
-    removendo zeros à direita e o ponto se ficar inteiro.
-    Mantém inteiros como estão. Ignora valores não-numéricos.
-    Suporta separadores "," e "."; define o separador decimal como o último
-    encontrado na string e remove os demais como separadores de milhar.
-    """
-    if s is None:
-        return ""
-    s = str(s).strip()
-    if s == "":
-        return ""
-    try:
-        # Detecta o separador decimal como o ÚLTIMO entre ',' e '.'
-        last_dot = s.rfind('.')
-        last_comma = s.rfind(',')
-        if last_dot == -1 and last_comma == -1:
-            # inteiro puro
-            dec = Decimal(s)
-        else:
-            dec_pos = max(last_dot, last_comma)
-            dec_sep = s[dec_pos]
-            int_part = s[:dec_pos].replace('.', '').replace(',', '')
-            frac_part = s[dec_pos+1:]
-            composed = f"{int_part}.{frac_part}" if dec_sep in {',','.'} else s
-            dec = Decimal(composed)
-        q = Decimal('0.01')
-        dec2 = dec.quantize(q, rounding=ROUND_HALF_UP)
-        out = format(dec2, 'f')
-        # remove zeros à direita e ponto final se necessário (máx 2 casas)
-        if '.' in out:
-            out = out.rstrip('0').rstrip('.')
-        return out
-    except (InvalidOperation, ValueError):
-        return s
-
-
 # ------------------- EXTERNOS: 1ª ABA (equivalente Carga_Financeira) -------------------
 def gerar_externos_prn_primeira_aba(xls_file):
     """
     Lê a 1ª aba do arquivo Excel e produz 'Externos.prn' replicando a macro Carga_Financeira:
-      - pega linhas 3..1500 pulando de 4 em 4
-      - se coluna C (3) não vazia, copia colunas C..Z (3..26) -> 24 colunas
-      - aplica larguras A..X conforme a macro
+    - pega linhas 3..1500 pulando de 4 em 4
+    - se coluna C (3) não vazia, copia colunas C..Z (3..26) -> 24 colunas
+    - aplica larguras A..X conforme a macro
     """
     # Detecta engine pelo sufixo (Streamlit fornece name no objeto)
     name = getattr(xls_file, "name", "").lower()
@@ -354,7 +299,7 @@ def gerar_externos_prn_primeira_aba(xls_file):
 
     # Função para obter o "valor de célula Excel" linha r/col c (Excel 1-based; df usa 0-based e 1ª linha é cabeçalho)
     def get_cell(r, c):
-        row_idx = r - 2   # Excel r=2 -> df.iloc[0]
+        row_idx = r - 2  # Excel r=2 -> df.iloc[0]
         col_idx = c - 1
         try:
             # Se a coluna não existir (por cabeçalho curto), tenta por posição
@@ -382,13 +327,13 @@ def gerar_externos_prn_primeira_aba(xls_file):
 def gerar_externos_prn_segunda_aba(xls_file):
     """
     Lê a 2ª aba do arquivo Excel e produz 'aexternos.prn' replicando Carga_Contabil:
-      - acha linhaLimite: primeira linha, a partir de B2, onde B é erro (#N/A). No pandas, tratamos NaN como quebra.
-        -> linhaLimite = (linhaErro - 4); se não achar, usa 1496
-      - copia intervalo B2:N(linhaLimite) -> 13 colunas
-      - larguras: A..M = [6,3,3,8,3,16,16,2,30,6,15,20,5]
-      - regras:
-          D == 0 -> limpar (ficar "")
-          F vazio ou 0 -> remover linha
+    - acha linhaLimite: primeira linha, a partir de B2, onde B é erro (#N/A). No pandas, tratamos NaN como quebra.
+      -> linhaLimite = (linhaErro - 4); se não achar, usa 1496
+    - copia intervalo B2:N(linhaLimite) -> 13 colunas
+    - larguras: A..M = [6,3,3,8,3,16,16,2,30,6,15,20,5]
+    - regras:
+      D == 0 -> limpar (ficar "")
+      F vazio ou 0 -> remover linha
     """
     name = getattr(xls_file, "name", "").lower()
     engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
@@ -423,7 +368,7 @@ def gerar_externos_prn_segunda_aba(xls_file):
         rows_raw.append(row_vals)
 
     # 3) Regras sobre as colunas:
-    #    D = idx 3 (0-based), F = idx 5 (0-based) no array rows_raw
+    # D = idx 3 (0-based), F = idx 5 (0-based) no array rows_raw
     rows_clean = []
     for vals in rows_raw:
         # limpar D se 0
@@ -440,13 +385,113 @@ def gerar_externos_prn_segunda_aba(xls_file):
     widths2 = [6, 3, 3, 8, 3, 16, 16, 2, 30, 6, 15, 20, 5]
     prn_bytes = _df_to_prn_bytes(rows_clean, widths2, encoding="cp1252")
     return prn_bytes  # para "aexternos.prn"
+
+# ------------------- ADICIONALES: 1ª ABA (igual Carga_Financeira) -------------------
+def gerar_adicionales_prn_primeira_aba(xls_file):
+    """
+    Lê a 1ª aba do arquivo Excel e produz 'Adicionales.prn':
+    - linhas 3..1500 pulando de 4 em 4
+    - se coluna C (3) não vazia, pega colunas C..Z (3..26) => 24 colunas
+    - aplica larguras A..X idênticas às da macro
+    """
+    name = getattr(xls_file, "name", "").lower()
+    engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
+
+    # dtype=str para preservar o que vier como texto
+    df = pd.read_excel(xls_file, sheet_name=0, header=0, dtype=str, engine=engine)
+
+    def get_cell(r, c):
+        row_idx = r - 2  # Excel r=2 -> df.iloc[0]
+        col_idx = c - 1
+        try:
+            if 0 <= row_idx < len(df.index) and 0 <= col_idx < len(df.columns):
+                return df.iloc[row_idx, col_idx]
+        except Exception:
+            return ""
+        return ""
+
+    # Larguras A..X (24 colunas) — iguais às da sua macro
+    widths = [10, 25, 6, 6, 6, 16, 16, 2, 5, 16, 3, 2, 30, 6, 3, 3, 8, 3, 6, 4, 16, 16, 3, 6]
+
+    rows_values = []
+    for r in range(3, 1501, 4):
+        val_c = _to_str(get_cell(r, 3))  # coluna C
+        if val_c != "":
+            row_vals = [get_cell(r, c) for c in range(3, 27)]  # C..Z
+            rows_values.append(row_vals)
+
+    # PRN único (todas as linhas)
+    prn_bytes = _df_to_prn_bytes(rows_values, widths, encoding="cp1252")
+    return prn_bytes  # "Adicionales.prn"
+
+
+# ------------------- ADICIONALES: 1ª ABA (PRNs individuais -> ZIP) -------------------
+def gerar_adicionales_zip_primeira_aba(xls_file, zip_name="Adicionales_PRNs.zip"):
+    """
+    Gera múltiplos PRNs (um por linha) da 1ª aba e retorna um ZIP com todos.
+    Nome de cada PRN: <valor_coluna_C_sanitizado>_<seq>.prn
+    """
+    from zipfile import ZipFile, ZIP_DEFLATED
+    from io import BytesIO
+
+    name = getattr(xls_file, "name", "").lower()
+    engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
+
+    df = pd.read_excel(xls_file, sheet_name=0, header=0, dtype=str, engine=engine)
+
+    def get_cell(r, c):
+        row_idx = r - 2
+        col_idx = c - 1
+        try:
+            if 0 <= row_idx < len(df.index) and 0 <= col_idx < len(df.columns):
+                return df.iloc[row_idx, col_idx]
+        except Exception:
+            return ""
+        return ""
+
+    widths = [10, 25, 6, 6, 6, 16, 16, 2, 5, 16, 3, 2, 30, 6, 3, 3, 8, 3, 6, 4, 16, 16, 3, 6]
+
+    # Monta PRNs individuais em memória
+    buffer_zip = BytesIO()
+    with ZipFile(buffer_zip, mode="w", compression=ZIP_DEFLATED) as zf:
+        seq = 1
+        for r in range(3, 1501, 4):
+            val_c = _to_str(get_cell(r, 3))  # coluna C é a A do arquivo temporário na tua macro
+            if val_c == "":
+                continue
+
+            row_vals = [get_cell(r, c) for c in range(3, 27)]
+            prn_bytes = _df_to_prn_bytes([row_vals], widths, encoding="cp1252")  # 1 linha -> 1 arquivo
+            # Sanitize para nome de arquivo
+            safe_prefix = (val_c or "linha").replace("\\", "_").replace("/", "_").replace(" ", "")
+            filename = f"{safe_prefix}_{seq}.prn"
+            zf.writestr(filename, prn_bytes)
+            seq += 1
+
+    buffer_zip.seek(0)
+    return buffer_zip.getvalue(), zip_name  # ZIP em bytes + nome padrão
+
+
+# ------------------- ADICIONALES: 2ª ABA (igual Aexternos.prn) -------------------
+def gerar_adicionales_prn_segunda_aba(xls_file):
+    """
+    Lê a 2ª aba do Excel e produz 'AAdicionales.prn', reutilizando a mesma regra do Aexternos.prn:
+    - encontra linha limite a partir de B2
+    - usa intervalo B2:N(linhaLimite) (13 colunas) com filtros (D->limpar 0; remove F vazio/0)
+    - larguras A..M = [6,3,3,8,3,16,16,2,30,6,15,20,5]
+    """
+    # Reaproveita exatamente a lógica da função de Externos (segunda aba)
+    # Apenas chama e devolve os bytes com novo nome.
+    return gerar_externos_prn_segunda_aba(xls_file)  # bytes idênticos; nome ajustaremos no botão
 # ================== FIM HELPERS (PRN) ==================
+
 # -----------------------------
 # Página
 # -----------------------------
 def render():
     _ensure_state()
     st.subheader("Aplicación Comex")
+
     tab4, tab2, tab3, tab1, tab5 = st.tabs([
         "📦 Arquivos modelo",
         "🌐 Tasa SUNAT",
@@ -454,6 +499,7 @@ def render():
         "📥 Processamento local",
         "📝 Transformar .prn"
     ])
+
     # -------------------------
     # 📥 Processamento local
     # -------------------------
@@ -461,14 +507,14 @@ def render():
         st.markdown("#### Ações rápidas")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Externos", use_container_width=True):
+            if st.button("Externos", key="act_externos", use_container_width=True):
                 _select_action("externos")
-            if st.button("Gastos Adicionales", use_container_width=True):
+            if st.button("Gastos Adicionales", key="act_gastos", use_container_width=True):
                 _select_action("gastos")
         with col2:
-            if st.button("Duas", use_container_width=True):
+            if st.button("Duas", key="act_duas", use_container_width=True):
                 _select_action("duas")
-            if st.button("Percepciones", use_container_width=True):
+            if st.button("Percepciones", key="act_perc", use_container_width=True):
                 _select_action("percepciones")
 
         # AVISO se o módulo DUAS não carregou (mas mantém os botões visíveis)
@@ -500,12 +546,13 @@ def render():
             with col_run:
                 run_clicked = st.button(
                     "▶️ Executar",
+                    key="action_run",
                     type="primary",
                     use_container_width=True,
                     disabled=not uploaded_files
                 )
             with col_clear:
-                clear_clicked = st.button("Limpar seleção", use_container_width=True)
+                clear_clicked = st.button("Limpar seleção", key="action_clear", use_container_width=True)
 
             if clear_clicked:
                 st.session_state.acao_selecionada = None
@@ -543,6 +590,7 @@ def render():
                                     file_name="duas_consolidado.csv",
                                     mime="text/csv",
                                     use_container_width=True,
+                                    key="duas_csv"
                                 )
                             with col_xlsx:
                                 xlsx_bytes = to_xlsx_bytes(df_final, sheet_name="DUAS")
@@ -552,6 +600,7 @@ def render():
                                     file_name="duas_consolidado.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     use_container_width=True,
+                                    key="duas_xlsx"
                                 )
                         else:
                             st.warning("Nenhuma tabela válida encontrada nos PDFs para o fluxo DUAS.")
@@ -580,6 +629,7 @@ def render():
                                     file_name="percepciones.csv",
                                     mime="text/csv",
                                     use_container_width=True,
+                                    key="percepciones_csv"
                                 )
                             with col_xlsx:
                                 xlsx_bytes = to_xlsx_bytes(df_final, sheet_name="Percepciones")
@@ -589,6 +639,7 @@ def render():
                                     file_name="percepciones.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     use_container_width=True,
+                                    key="percepciones_xlsx"
                                 )
                         else:
                             st.warning("Nenhuma informação válida encontrada nos PDFs para Percepciones.")
@@ -616,6 +667,7 @@ def render():
                                     file_name="externos.csv",
                                     mime="text/csv",
                                     use_container_width=True,
+                                    key="externos_csv"
                                 )
                             with col_xlsx:
                                 # >>> ALTERADO: gerar XLSX com duas abas (normal + espaçado)
@@ -631,6 +683,7 @@ def render():
                                     file_name="externos.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     use_container_width=True,
+                                    key="externos_xlsx"
                                 )
                         else:
                             st.warning("Nenhuma informação válida encontrada nos PDFs para Externos.")
@@ -657,6 +710,7 @@ def render():
                                     file_name="gastos_adicionales.csv",
                                     mime="text/csv",
                                     use_container_width=True,
+                                    key="adicionales_csv"
                                 )
                             with col_xlsx:
                                 xlsx_bytes = to_xlsx_bytes(df_final, sheet_name="Adicionales")
@@ -666,6 +720,7 @@ def render():
                                     file_name="gastos_adicionales.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     use_container_width=True,
+                                    key="adicionales_xlsx"
                                 )
                         else:
                             st.warning("Nenhuma informação válida encontrada nos PDFs para Gastos Adicionales.")
@@ -680,7 +735,7 @@ def render():
             ["2024", "2025", "2026"],
             default=["2024", "2025", "2026"]
         )
-        if st.button("Atualizar Tasa"):
+        if st.button("Atualizar Tasa", key="tasa_update"):
             status = st.empty()
             pbar = st.progress(0, text="Iniciando...")
             df = atualizar_dataframe_tasa(
@@ -698,6 +753,7 @@ def render():
                         file_name="tasa_consolidada.csv",
                         mime="text/csv",
                         use_container_width=True,
+                        key="tasa_csv"
                     )
                 with col_xlsx:
                     xlsx_bytes = to_xlsx_bytes(df, sheet_name="Tasa")
@@ -707,6 +763,7 @@ def render():
                         file_name="tasa_consolidada.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True,
+                        key="tasa_xlsx"
                     )
             else:
                 st.warning("Não foi possível obter dados da Tasa. Verifique credenciais/token/cookie.")
@@ -751,7 +808,8 @@ def render():
                         data=df_all.to_csv(index=False).encode("utf-8"),
                         file_name="sharepoint_all.csv",
                         mime="text/csv",
-                        use_container_width=True
+                        use_container_width=True,
+                        key="sharepoint_csv"
                     )
                 with col_xlsx:
                     buffer = BytesIO()
@@ -766,7 +824,8 @@ def render():
                         data=buffer,
                         file_name="sharepoint_all.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
+                        use_container_width=True,
+                        key="sharepoint_xlsx"
                     )
             except ValueError:
                 st.error("❌ A aba 'all' não foi encontrada no arquivo Excel.")
@@ -776,35 +835,48 @@ def render():
 
     with tab4:
         downloads_page.render()
-    
+
     with tab5:
-        st.subheader("🗎 Transformar .prn")
+        st.subheader("📝 Transformar .prn")
         st.caption("Selecione um fluxo abaixo e carregue o Excel (primeira aba = Carga Financeira, segunda aba = Carga Contábil).")
-    
+
+        # ---------- ESTADO PERSISTENTE DO FLUXO PRN ----------
+        if "prn_flow" not in st.session_state:
+            st.session_state.prn_flow = None  # valores possíveis: "externos", "duas", "gastos"
+
         c1, c2, c3 = st.columns(3)
         with c1:
-            btn_duas = st.button("Duas", use_container_width=True)
+            if st.button("Duas", key="prn_duas_select", use_container_width=True):
+                st.session_state.prn_flow = "duas"
         with c2:
-            btn_externos = st.button("Externos", use_container_width=True)
+            if st.button("Externos", key="prn_externos_select", use_container_width=True):
+                st.session_state.prn_flow = "externos"
         with c3:
-            btn_gastos = st.button("Gastos Adicionales", use_container_width=True)
-    
+            if st.button("Gastos Adicionales", key="prn_gastos_select", use_container_width=True):
+                st.session_state.prn_flow = "gastos"
+
         st.divider()
-    
+
+        # ---------- MOSTRA O BLOCO CONFORME O FLUXO SELECIONADO ----------
+        flow = st.session_state.prn_flow
+
         # -------------------- FLUXO EXTERNOS (implementado) --------------------
-        if btn_externos:
+        if flow == "externos":
             st.info("Fluxo **Externos** selecionado. Carregue o arquivo Excel.")
             uploaded_xl = st.file_uploader(
                 "Carregar Excel (.xlsx ou .xls) para gerar PRN",
                 type=["xlsx", "xls"],
-                key="prn_externos_upl",
+                key="prn_externos_upl",              # chave estável
                 accept_multiple_files=False,
                 help="A 1ª aba será usada para 'Externos.prn' (Carga_Financeira) e a 2ª para 'aexternos.prn' (Carga_Contabil)."
             )
-            if uploaded_xl:
+
+            # Só renderiza os botões de geração quando já há arquivo carregado
+            if uploaded_xl is not None:
                 colg1, colg2 = st.columns(2)
+
                 with colg1:
-                    if st.button("Gerar Externos.prn", type="primary", use_container_width=True):
+                    if st.button("Gerar Externos.prn", key="gen_externos_prn1", type="primary", use_container_width=True):
                         try:
                             prn_bytes = gerar_externos_prn_primeira_aba(uploaded_xl)
                             st.success("Arquivo **Externos.prn** gerado!")
@@ -813,13 +885,15 @@ def render():
                                 data=prn_bytes,
                                 file_name="Externos.prn",
                                 mime="text/plain",
-                                use_container_width=True
+                                use_container_width=True,
+                                key="dl_externos_prn1"
                             )
                         except Exception as e:
                             st.error("Falha ao gerar Externos.prn")
                             st.exception(e)
+
                 with colg2:
-                    if st.button("Gerar aexternos.prn", type="secondary", use_container_width=True):
+                    if st.button("Gerar aexternos.prn", key="gen_externos_prn2", type="secondary", use_container_width=True):
                         try:
                             prn_bytes2 = gerar_externos_prn_segunda_aba(uploaded_xl)
                             st.success("Arquivo **aexternos.prn** gerado!")
@@ -828,18 +902,81 @@ def render():
                                 data=prn_bytes2,
                                 file_name="aexternos.prn",
                                 mime="text/plain",
-                                use_container_width=True
+                                use_container_width=True,
+                                key="dl_externos_prn2"
                             )
                         except Exception as e:
                             st.error("Falha ao gerar aexternos.prn")
                             st.exception(e)
-    
+
         # -------------------- FLUXO DUAS (placeholder) --------------------
-        if btn_duas:
+        elif flow == "duas":
             st.info("Fluxo **Duas** selecionado. (Em breve: lógica específica para gerar PRN a partir do Excel.)")
             st.caption("Se quiser, já me passe a macro/algoritmo e eu programo aqui.")
-    
+
         # -------------------- FLUXO GASTOS ADICIONALES (placeholder) --------------------
-        if btn_gastos:
-            st.info("Fluxo **Gastos Adicionales** selecionado. (Em breve: lógica específica para gerar PRN a partir do Excel.)")
-            st.caption("Me envie a macro/algoritmo e implemento igual fiz no Externos.")
+# -------------------- FLUXO GASTOS ADICIONALES --------------------
+        elif flow == "gastos":
+            st.info("Fluxo **Gastos Adicionales** selecionado. Carregue o arquivo Excel.")
+            uploaded_xl_g = st.file_uploader(
+                "Carregar Excel (.xlsx ou .xls) para gerar PRN",
+                type=["xlsx", "xls"],
+                key="prn_gastos_upl",
+                accept_multiple_files=False,
+                help="1ª aba -> Adicionales.prn / ZIP (PRNs por linha) | 2ª aba -> AAdicionales.prn"
+            )
+
+            if uploaded_xl_g is not None:
+                # Três ações: PRN único (1ª aba), ZIP com PRNs individuais (1ª aba), PRN único da 2ª aba
+                cga1, cga2, cga3 = st.columns(3)
+
+                with cga1:
+                    if st.button("Gerar Adicionales.prn", key="gen_adic_prn1", type="primary", use_container_width=True):
+                        try:
+                            prn_bytes_adic = gerar_adicionales_prn_primeira_aba(uploaded_xl_g)
+                            st.success("Arquivo **Adicionales.prn** gerado!")
+                            st.download_button(
+                                "Baixar Adicionales.prn",
+                                data=prn_bytes_adic,
+                                file_name="Adicionales.prn",
+                                mime="text/plain",
+                                use_container_width=True,
+                                key="dl_adic_prn1"
+                            )
+                        except Exception as e:
+                            st.error("Falha ao gerar Adicionales.prn")
+                            st.exception(e)
+
+                with cga2:
+                    if st.button("Gerar ZIP (PRNs por linha)", key="gen_adic_zip", type="secondary", use_container_width=True):
+                        try:
+                            zip_bytes, zip_name = gerar_adicionales_zip_primeira_aba(uploaded_xl_g, zip_name="Adicionales_PRNs.zip")
+                            st.success("Arquivo **ZIP** com PRNs individuais gerado!")
+                            st.download_button(
+                                "Baixar Adicionales_PRNs.zip",
+                                data=zip_bytes,
+                                file_name=zip_name,
+                                mime="application/zip",
+                                use_container_width=True,
+                                key="dl_adic_zip"
+                            )
+                        except Exception as e:
+                            st.error("Falha ao gerar ZIP com PRNs individuais")
+                            st.exception(e)
+
+                with cga3:
+                    if st.button("Gerar AAdicionales.prn", key="gen_adic_prn2", use_container_width=True):
+                        try:
+                            prn_bytes_aadic = gerar_adicionales_prn_segunda_aba(uploaded_xl_g)
+                            st.success("Arquivo **AAdicionales.prn** gerado!")
+                            st.download_button(
+                                "Baixar AAdicionales.prn",
+                                data=prn_bytes_aadic,
+                                file_name="AAdicionales.prn",
+                                mime="text/plain",
+                                use_container_width=True,
+                                key="dl_adic_prn2"
+                            )
+                        except Exception as e:
+                            st.error("Falha ao gerar AAdicionales.prn")
+                            st.exception(e)
