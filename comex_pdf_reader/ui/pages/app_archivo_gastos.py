@@ -172,8 +172,8 @@ def render():
         if st.button("Plantilla Gastos", use_container_width=True):
             _set_mode("plantilla")
     with col_b3:
-        if st.button("Asientos", use_container_width=True):
-            _set_mode("asientos")
+        if st.button("Analise", use_container_width=True):
+            _set_mode("Analise")
 
     mode = st.session_state["aag_mode"]
     st.divider()
@@ -368,7 +368,7 @@ def render():
                 st.exception(e)
 
     # -------------------------------------------------------------------------
-    # Modo: Asientos — placeholder
+    # Modo: Analise — placeholder
     # -------------------------------------------------------------------------
-    elif mode == "asientos":
-        st.info("📒 *Asientos* — em breve conectaremos a lógica aqui.")
+    elif mode == "Analise":
+        st.info("📒 *Analise* — em breve conectaremos a lógica aqui.")
