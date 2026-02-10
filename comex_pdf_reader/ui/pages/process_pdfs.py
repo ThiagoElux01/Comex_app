@@ -386,6 +386,103 @@ def gerar_externos_prn_segunda_aba(xls_file):
     prn_bytes = _df_to_prn_bytes(rows_clean, widths2, encoding="cp1252")
     return prn_bytes  # para "aexternos.prn"
 
+# ------------------- ADICIONALES: 1ª ABA (igual Carga_Financeira) -------------------
+def gerar_adicionales_prn_primeira_aba(xls_file):
+    """
+    Lê a 1ª aba do arquivo Excel e produz 'Adicionales.prn':
+    - linhas 3..1500 pulando de 4 em 4
+    - se coluna C (3) não vazia, pega colunas C..Z (3..26) => 24 colunas
+    - aplica larguras A..X idênticas às da macro
+    """
+    name = getattr(xls_file, "name", "").lower()
+    engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
+
+    # dtype=str para preservar o que vier como texto
+    df = pd.read_excel(xls_file, sheet_name=0, header=0, dtype=str, engine=engine)
+
+    def get_cell(r, c):
+        row_idx = r - 2  # Excel r=2 -> df.iloc[0]
+        col_idx = c - 1
+        try:
+            if 0 <= row_idx < len(df.index) and 0 <= col_idx < len(df.columns):
+                return df.iloc[row_idx, col_idx]
+        except Exception:
+            return ""
+        return ""
+
+    # Larguras A..X (24 colunas) — iguais às da sua macro
+    widths = [10, 25, 6, 6, 6, 16, 16, 2, 5, 16, 3, 2, 30, 6, 3, 3, 8, 3, 6, 4, 16, 16, 3, 6]
+
+    rows_values = []
+    for r in range(3, 1501, 4):
+        val_c = _to_str(get_cell(r, 3))  # coluna C
+        if val_c != "":
+            row_vals = [get_cell(r, c) for c in range(3, 27)]  # C..Z
+            rows_values.append(row_vals)
+
+    # PRN único (todas as linhas)
+    prn_bytes = _df_to_prn_bytes(rows_values, widths, encoding="cp1252")
+    return prn_bytes  # "Adicionales.prn"
+
+
+# ------------------- ADICIONALES: 1ª ABA (PRNs individuais -> ZIP) -------------------
+def gerar_adicionales_zip_primeira_aba(xls_file, zip_name="Adicionales_PRNs.zip"):
+    """
+    Gera múltiplos PRNs (um por linha) da 1ª aba e retorna um ZIP com todos.
+    Nome de cada PRN: <valor_coluna_C_sanitizado>_<seq>.prn
+    """
+    from zipfile import ZipFile, ZIP_DEFLATED
+    from io import BytesIO
+
+    name = getattr(xls_file, "name", "").lower()
+    engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
+
+    df = pd.read_excel(xls_file, sheet_name=0, header=0, dtype=str, engine=engine)
+
+    def get_cell(r, c):
+        row_idx = r - 2
+        col_idx = c - 1
+        try:
+            if 0 <= row_idx < len(df.index) and 0 <= col_idx < len(df.columns):
+                return df.iloc[row_idx, col_idx]
+        except Exception:
+            return ""
+        return ""
+
+    widths = [10, 25, 6, 6, 6, 16, 16, 2, 5, 16, 3, 2, 30, 6, 3, 3, 8, 3, 6, 4, 16, 16, 3, 6]
+
+    # Monta PRNs individuais em memória
+    buffer_zip = BytesIO()
+    with ZipFile(buffer_zip, mode="w", compression=ZIP_DEFLATED) as zf:
+        seq = 1
+        for r in range(3, 1501, 4):
+            val_c = _to_str(get_cell(r, 3))  # coluna C é a A do arquivo temporário na tua macro
+            if val_c == "":
+                continue
+
+            row_vals = [get_cell(r, c) for c in range(3, 27)]
+            prn_bytes = _df_to_prn_bytes([row_vals], widths, encoding="cp1252")  # 1 linha -> 1 arquivo
+            # Sanitize para nome de arquivo
+            safe_prefix = (val_c or "linha").replace("\\", "_").replace("/", "_").replace(" ", "")
+            filename = f"{safe_prefix}_{seq}.prn"
+            zf.writestr(filename, prn_bytes)
+            seq += 1
+
+    buffer_zip.seek(0)
+    return buffer_zip.getvalue(), zip_name  # ZIP em bytes + nome padrão
+
+
+# ------------------- ADICIONALES: 2ª ABA (igual Aexternos.prn) -------------------
+def gerar_adicionales_prn_segunda_aba(xls_file):
+    """
+    Lê a 2ª aba do Excel e produz 'AAdicionales.prn', reutilizando a mesma regra do Aexternos.prn:
+    - encontra linha limite a partir de B2
+    - usa intervalo B2:N(linhaLimite) (13 colunas) com filtros (D->limpar 0; remove F vazio/0)
+    - larguras A..M = [6,3,3,8,3,16,16,2,30,6,15,20,5]
+    """
+    # Reaproveita exatamente a lógica da função de Externos (segunda aba)
+    # Apenas chama e devolve os bytes com novo nome.
+    return gerar_externos_prn_segunda_aba(xls_file)  # bytes idênticos; nome ajustaremos no botão
 # ================== FIM HELPERS (PRN) ==================
 
 # -----------------------------
@@ -818,6 +915,68 @@ def render():
             st.caption("Se quiser, já me passe a macro/algoritmo e eu programo aqui.")
 
         # -------------------- FLUXO GASTOS ADICIONALES (placeholder) --------------------
+# -------------------- FLUXO GASTOS ADICIONALES --------------------
         elif flow == "gastos":
-            st.info("Fluxo **Gastos Adicionales** selecionado. (Em breve: lógica específica para gerar PRN a partir do Excel.)")
-            st.caption("Me envie a macro/algoritmo e implemento igual fiz no Externos.")
+            st.info("Fluxo **Gastos Adicionales** selecionado. Carregue o arquivo Excel.")
+            uploaded_xl_g = st.file_uploader(
+                "Carregar Excel (.xlsx ou .xls) para gerar PRN",
+                type=["xlsx", "xls"],
+                key="prn_gastos_upl",
+                accept_multiple_files=False,
+                help="1ª aba -> Adicionales.prn / ZIP (PRNs por linha) | 2ª aba -> AAdicionales.prn"
+            )
+
+            if uploaded_xl_g is not None:
+                # Três ações: PRN único (1ª aba), ZIP com PRNs individuais (1ª aba), PRN único da 2ª aba
+                cga1, cga2, cga3 = st.columns(3)
+
+                with cga1:
+                    if st.button("Gerar Adicionales.prn", key="gen_adic_prn1", type="primary", use_container_width=True):
+                        try:
+                            prn_bytes_adic = gerar_adicionales_prn_primeira_aba(uploaded_xl_g)
+                            st.success("Arquivo **Adicionales.prn** gerado!")
+                            st.download_button(
+                                "Baixar Adicionales.prn",
+                                data=prn_bytes_adic,
+                                file_name="Adicionales.prn",
+                                mime="text/plain",
+                                use_container_width=True,
+                                key="dl_adic_prn1"
+                            )
+                        except Exception as e:
+                            st.error("Falha ao gerar Adicionales.prn")
+                            st.exception(e)
+
+                with cga2:
+                    if st.button("Gerar ZIP (PRNs por linha)", key="gen_adic_zip", type="secondary", use_container_width=True):
+                        try:
+                            zip_bytes, zip_name = gerar_adicionales_zip_primeira_aba(uploaded_xl_g, zip_name="Adicionales_PRNs.zip")
+                            st.success("Arquivo **ZIP** com PRNs individuais gerado!")
+                            st.download_button(
+                                "Baixar Adicionales_PRNs.zip",
+                                data=zip_bytes,
+                                file_name=zip_name,
+                                mime="application/zip",
+                                use_container_width=True,
+                                key="dl_adic_zip"
+                            )
+                        except Exception as e:
+                            st.error("Falha ao gerar ZIP com PRNs individuais")
+                            st.exception(e)
+
+                with cga3:
+                    if st.button("Gerar AAdicionales.prn", key="gen_adic_prn2", use_container_width=True):
+                        try:
+                            prn_bytes_aadic = gerar_adicionales_prn_segunda_aba(uploaded_xl_g)
+                            st.success("Arquivo **AAdicionales.prn** gerado!")
+                            st.download_button(
+                                "Baixar AAdicionales.prn",
+                                data=prn_bytes_aadic,
+                                file_name="AAdicionales.prn",
+                                mime="text/plain",
+                                use_container_width=True,
+                                key="dl_adic_prn2"
+                            )
+                        except Exception as e:
+                            st.error("Falha ao gerar AAdicionales.prn")
+                            st.exception(e)
