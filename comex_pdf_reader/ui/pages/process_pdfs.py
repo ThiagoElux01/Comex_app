@@ -93,15 +93,18 @@ USE_PRN_WIDTHS = True  # <- altere para False se quiser voltar ao autoajuste
 PRN_WIDTHS_1 = [10, 25, 6, 6, 6, 16, 16, 2, 5, 16, 3, 2, 30, 6, 3, 3, 8, 3, 6, 4, 16, 16, 3, 6]  # 24 colunas
 PRN_WIDTHS_2 = [6, 3, 3, 8, 3, 16, 16, 2, 30, 6, 15, 20, 5]                                      # 13 colunas
 
-def set_fixed_widths(ws, widths, start_col: int = 1):
+from openpyxl.utils import get_column_letter
+
+def set_fixed_widths(ws, widths, start_col: int = 1, add_excel_padding: bool = True):
     """
-    Aplica larguras fixas (em 'caracteres') por coluna, similares às usadas nos PRN.
-    widths: lista de inteiros/float (ex.: [10,25,6,...])
-    start_col: 1 para começar na coluna A; 3 significaria começar em C, etc.
+    Define larguras fixas por coluna.
+    Quando add_excel_padding=True, soma ~0.71 para que o Excel exiba o mesmo número do PRN
+    na caixa 'Column width' (ex.: gravar 10.71 para a UI mostrar 10.00).
     """
+    PADDING = 0.71 if add_excel_padding else 0.0
     for i, w in enumerate(widths, start=start_col):
         col_letter = get_column_letter(i)
-        ws.column_dimensions[col_letter].width = float(w)
+        ws.column_dimensions[col_letter].width = float(w) + PADDING
 
 def _autofit_worksheet(ws, font_padding: float = 1.2, min_width: float = 8.0, max_width: float = 60.0):
     if ws.max_column is None or ws.max_row is None:
