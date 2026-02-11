@@ -93,8 +93,6 @@ USE_PRN_WIDTHS = True  # <- altere para False se quiser voltar ao autoajuste
 PRN_WIDTHS_1 = [10, 25, 6, 6, 6, 16, 16, 2, 5, 16, 3, 2, 30, 6, 3, 3, 8, 3, 6, 4, 16, 16, 3, 6]  # 24 colunas
 PRN_WIDTHS_2 = [6, 3, 3, 8, 3, 16, 16, 2, 30, 6, 15, 20, 5]                                      # 13 colunas
 
-from openpyxl.utils import get_column_letter
-
 def set_fixed_widths(ws, widths, start_col: int = 1, add_excel_padding: bool = True):
     """
     Define larguras fixas por coluna.
@@ -537,11 +535,113 @@ def gerar_externos_xlsx_segunda_aba(xls_file):
 # ADICIONALES 1ª aba -> XLSX
 def gerar_adicionales_xlsx_primeira_aba(xls_file):
     # reaproveita a mesma lógica de leitura da 1ª aba
-    return gerar_externos_xlsx_primeira_aba(xls_file).rstrip(b"")
+    return gerar_externos_xlsx_primeira_aba(xls_file)
 
 # ADICIONALES 2ª aba -> XLSX
 def gerar_adicionales_xlsx_segunda_aba(xls_file):
-    return gerar_externos_xlsx_segunda_aba(xls_file).rstrip(b"")
+    return gerar_externos_xlsx_segunda_aba(xls_file)
+
+# ======================= DUAS - 1ª ABA → PRN =======================
+def gerar_duas_prn_primeira_aba(xls_file):
+    name = getattr(xls_file, "name", "").lower()
+    engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
+    df = pd.read_excel(xls_file, sheet_name=0, header=0, dtype=str, engine=engine)
+
+    def get_cell(r, c):
+        ri = r - 2
+        ci = c - 1
+        try:
+            if 0 <= ri < len(df.index) and 0 <= ci < len(df.columns):
+                return df.iloc[ri, ci]
+        except Exception:
+            return ""
+        return ""
+
+    widths = PRN_WIDTHS_1[:]  # 24 colunas
+
+    rows = []
+    for r in range(3, 1501, 4):
+        if _to_str(get_cell(r, 3)) != "":
+            rows.append([get_cell(r, c) for c in range(3, 27)])
+
+    DEC2_COLS = {5, 6, 9, 20, 21}
+    def fmt(col_idx, value):
+        return _format_decimal_2_dot(value) if col_idx in DEC2_COLS else _to_str(value)
+
+    return _df_to_prn_bytes(rows, widths, encoding="cp1252", fmt=fmt)
+
+# ======================= DUAS - 2ª ABA → PRN =======================
+def gerar_duas_prn_segunda_aba(xls_file):
+    # Mesma regra usada para Externos/Adicionales 2ª aba
+    return gerar_externos_prn_segunda_aba(xls_file)
+
+# ======================= DUAS - 1ª ABA → XLSX =======================
+def gerar_duas_xlsx_primeira_aba(xls_file):
+    name = getattr(xls_file, "name", "").lower()
+    engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
+    df = pd.read_excel(xls_file, sheet_name=0, header=0, dtype=str, engine=engine)
+
+    def get_cell(r, c):
+        ri = r - 2
+        ci = c - 1
+        try:
+            if 0 <= ri < len(df.index) and 0 <= ci < len(df.columns):
+                return df.iloc[ri, ci]
+        except Exception:
+            return ""
+        return ""
+
+    rows = []
+    for r in range(3, 1501, 4):
+        if _to_str(get_cell(r, 3)) != "":
+            rows.append([get_cell(r, c) for c in range(3, 27)])  # 24 colunas
+
+    headers = [f"Col_{chr(65+i)}" for i in range(24)]  # A..X
+    decimal_cols = {5, 6, 9, 20, 21}  # F,G,J,U,V
+    return _rows_to_xlsx_bytes(rows, headers, "Duas", decimal_cols)
+
+# ======================= DUAS - 2ª ABA → XLSX =======================
+def gerar_duas_xlsx_segunda_aba(xls_file):
+    name = getattr(xls_file, "name", "").lower()
+    engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
+    df2 = pd.read_excel(xls_file, sheet_name=1, header=0, dtype=str, engine=engine)
+
+    def get_cell2(r, c):
+        ri = r - 2
+        ci = c - 1
+        try:
+            if 0 <= ri < len(df2.index) and 0 <= ci < len(df2.columns):
+                return df2.iloc[ri, ci]
+        except Exception:
+            return ""
+        return ""
+
+    linha_limite = 0
+    for r in range(2, 46001):
+        val_b = get_cell2(r, 2)
+        if (val_b is None) or (str(val_b).strip() in {"#N/A", "#N/D"}) or (pd.isna(val_b)):
+            linha_limite = r - 4
+            break
+    if linha_limite <= 0:
+        linha_limite = 1496
+
+    rows_raw = []
+    for r in range(2, max(2, linha_limite) + 1):
+        rows_raw.append([get_cell2(r, c) for c in range(2, 15)])  # 13 colunas
+
+    rows_clean = []
+    for vals in rows_raw:
+        d_val = _to_str(vals[3])
+        if d_val.strip() in {"0", "0.0"}:
+            vals[3] = ""
+        f_val = _to_str(vals[5]).strip()
+        if f_val in {"", "0", "0.0"}:
+            continue
+        rows_clean.append(vals)
+
+    headers = [f"Col_{chr(65+i)}" for i in range(13)]  # A..M
+    decimal_cols = {5}  # F
+    return _rows_to_xlsx_bytes(rows_clean, headers, "ADuas", decimal_cols)
 
 # -----------------------------
 # Página
@@ -829,10 +929,65 @@ def render():
                             st.error("Falha ao gerar aexternos.xlsx")
                             st.exception(e)
 
-        # -------------------- FLUXO DUAS (placeholder) --------------------
+        # -------------------- FLUXO DUAS --------------------
         elif flow == "duas":
-            st.info("Fluxo **Duas** selecionado. (Em breve: lógica específica para gerar PRN/XLSX a partir do Excel.)")
-            st.caption("Se quiser, já me passe a macro/algoritmo e eu programo aqui.")
+            st.info("Fluxo **DUAS** selecionado. Carregue o arquivo Excel.")
+            uploaded_xl_d = st.file_uploader(
+                "Carregar Excel (.xlsx ou .xls) para gerar PRN/XLSX",
+                type=["xlsx", "xls"],
+                key="prn_duas_upl",
+                accept_multiple_files=False,
+                help="1ª aba -> Duas.prn/.xlsx | 2ª aba -> ADuas.prn/.xlsx"
+            )
+
+            if uploaded_xl_d is not None:
+                c1, c2 = st.columns(2)
+
+                # -------- PRIMEIRA ABA --------
+                with c1:
+                    if st.button("Gerar Duas.prn", key="gen_duas_prn1", type="primary", use_container_width=True):
+                        try:
+                            prn_bytes = gerar_duas_prn_primeira_aba(uploaded_xl_d)
+                            st.success("Arquivo **Duas.prn** gerado!")
+                            st.download_button("Baixar Duas.prn", data=prn_bytes, file_name="Duas.prn",
+                                               mime="text/plain", use_container_width=True, key="dl_duas_prn1")
+                        except Exception as e:
+                            st.error("Falha ao gerar Duas.prn")
+                            st.exception(e)
+
+                    if st.button("Gerar Duas.xlsx", key="gen_duas_xlsx1", use_container_width=True):
+                        try:
+                            xlsx1 = gerar_duas_xlsx_primeira_aba(uploaded_xl_d)
+                            st.success("Arquivo **Duas.xlsx** gerado!")
+                            st.download_button("Baixar Duas.xlsx", data=xlsx1, file_name="Duas.xlsx",
+                                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                               use_container_width=True, key="dl_duas_xlsx1")
+                        except Exception as e:
+                            st.error("Falha ao gerar Duas.xlsx")
+                            st.exception(e)
+
+                # -------- SEGUNDA ABA --------
+                with c2:
+                    if st.button("Gerar ADuas.prn", key="gen_duas_prn2", use_container_width=True):
+                        try:
+                            prn_bytes2 = gerar_duas_prn_segunda_aba(uploaded_xl_d)
+                            st.success("Arquivo **ADuas.prn** gerado!")
+                            st.download_button("Baixar ADuas.prn", data=prn_bytes2, file_name="ADuas.prn",
+                                               mime="text/plain", use_container_width=True, key="dl_duas_prn2")
+                        except Exception as e:
+                            st.error("Falha ao gerar ADuas.prn")
+                            st.exception(e)
+
+                    if st.button("Gerar ADuas.xlsx", key="gen_duas_xlsx2", use_container_width=True):
+                        try:
+                            xlsx2 = gerar_duas_xlsx_segunda_aba(uploaded_xl_d)
+                            st.success("Arquivo **ADuas.xlsx** gerado!")
+                            st.download_button("Baixar ADuas.xlsx", data=xlsx2, file_name="ADuas.xlsx",
+                                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                               use_container_width=True, key="dl_duas_xlsx2")
+                        except Exception as e:
+                            st.error("Falha ao gerar ADuas.xlsx")
+                            st.exception(e)
 
         # -------------------- FLUXO GASTOS ADICIONALES --------------------
         elif flow == "gastos":
