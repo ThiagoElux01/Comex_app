@@ -15,7 +15,7 @@ def render():
     st.subheader("📦 Arquivos modelo")
     st.caption("Baixe os templates em Excel (.xlsx) para preparar os dados.")
 
-    col1, col2, col3, col4 = st.columns(4)
+    col4, col1, col2, col3 = st.columns(4)
 
     with col1:
         st.download_button(
