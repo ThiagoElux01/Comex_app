@@ -366,6 +366,7 @@ def gerar_externos_prn_segunda_aba(xls_file):
     - regras:
       D == 0 -> limpar (ficar "")
       F vazio ou 0 -> remover linha
+    - formatação: aplicar 2 casas decimais SOMENTE na coluna F do PRN (índice 5)
     """
     name = getattr(xls_file, "name", "").lower()
     engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
@@ -415,7 +416,15 @@ def gerar_externos_prn_segunda_aba(xls_file):
 
     # 4) Larguras A..M (13 colunas), como na sua macro
     widths2 = [6, 3, 3, 8, 3, 16, 16, 2, 30, 6, 15, 20, 5]
-    prn_bytes = _df_to_prn_bytes(rows_clean, widths2, encoding="cp1252")
+
+    # 5) Formatação: SOMENTE a coluna F do PRN (índice 5) com 2 casas decimais
+    DEC2_COLS = {5}
+    def fmt(col_idx, value):
+        if col_idx in DEC2_COLS:
+            return _format_decimal_2_dot(value)
+        return _to_str(value)
+
+    prn_bytes = _df_to_prn_bytes(rows_clean, widths2, encoding="cp1252", fmt=fmt)
     return prn_bytes  # para "aexternos.prn"
 
 # ------------------- ADICIONALES: 1ª ABA (igual Carga_Financeira) -------------------
@@ -527,6 +536,7 @@ def gerar_adicionales_prn_segunda_aba(xls_file):
     - encontra linha limite a partir de B2
     - usa intervalo B2:N(linhaLimite) (13 colunas) com filtros (D->limpar 0; remove F vazio/0)
     - larguras A..M = [6,3,3,8,3,16,16,2,30,6,15,20,5]
+    - formatação: aplicar 2 casas decimais SOMENTE na coluna F do PRN (índice 5)
     """
     # Reaproveita exatamente a lógica da função de Externos (segunda aba)
     # Apenas chama e devolve os bytes com novo nome.
