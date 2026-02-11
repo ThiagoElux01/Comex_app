@@ -59,7 +59,7 @@ if not DUAS_AVAILABLE:
     with st.expander("Detalhes técnicos do erro (DUAS)"):
         st.exception(DUAS_ERR)
 
-# --- NOVO: Import protegido do Externos (segue o mesmo padrão dos demais) ---
+# --- NOVO: Import protegido do Externos ---
 EXTERNOS_AVAILABLE = True
 EXTERNOS_ERR = None
 try:
@@ -429,7 +429,6 @@ def gerar_adicionales_prn_segunda_aba(xls_file):
     return gerar_externos_prn_segunda_aba(xls_file)  # mesma regra
 
 # ================== HELPERS XLSX (novos) ==================
-# >>> ADIÇÃO XLSX
 
 def _rows_to_xlsx_bytes(rows, headers, sheet_name, decimal_cols_idx=None):
     """Converte 'rows' (lista de listas) em XLSX com headers, aplicando 2 casas nas colunas indicadas."""
@@ -534,7 +533,6 @@ def gerar_externos_xlsx_segunda_aba(xls_file):
 
 # ADICIONALES 1ª aba -> XLSX
 def gerar_adicionales_xlsx_primeira_aba(xls_file):
-    # reaproveita a mesma lógica de leitura da 1ª aba
     return gerar_externos_xlsx_primeira_aba(xls_file)
 
 # ADICIONALES 2ª aba -> XLSX
@@ -574,6 +572,11 @@ def gerar_duas_prn_primeira_aba(xls_file):
 def gerar_duas_prn_segunda_aba(xls_file):
     # Mesma regra usada para Externos/Adicionales 2ª aba
     return gerar_externos_prn_segunda_aba(xls_file)
+
+# ======================= DUAS – ZIP (PRNs por linha – 1ª aba) =======================
+def gerar_duas_zip_primeira_aba(xls_file, zip_name="Duas_PRNs.zip"):
+    # Reutiliza a mesma lógica do ZIP de Adicionales, mudando apenas o nome do arquivo
+    return gerar_adicionales_zip_primeira_aba(xls_file, zip_name=zip_name)
 
 # ======================= DUAS - 1ª ABA → XLSX =======================
 def gerar_duas_xlsx_primeira_aba(xls_file):
@@ -898,7 +901,7 @@ def render():
                             st.error("Falha ao gerar Externos.prn")
                             st.exception(e)
 
-                    # >>> ADIÇÃO XLSX (1ª aba)
+                    # XLSX (1ª aba)
                     if st.button("Gerar Externos.xlsx", key="gen_externos_xlsx1", use_container_width=True):
                         try:
                             xlsx_bytes = gerar_externos_xlsx_primeira_aba(uploaded_xl)
@@ -919,7 +922,7 @@ def render():
                             st.error("Falha ao gerar aexternos.prn")
                             st.exception(e)
 
-                    # >>> ADIÇÃO XLSX (2ª aba)
+                    # XLSX (2ª aba)
                     if st.button("Gerar aexternos.xlsx", key="gen_externos_xlsx2", use_container_width=True):
                         try:
                             xlsx_bytes2 = gerar_externos_xlsx_segunda_aba(uploaded_xl)
@@ -953,6 +956,17 @@ def render():
                                                mime="text/plain", use_container_width=True, key="dl_duas_prn1")
                         except Exception as e:
                             st.error("Falha ao gerar Duas.prn")
+                            st.exception(e)
+
+                    # NOVO: ZIP PRNs por linha (1ª aba)
+                    if st.button("Gerar ZIP (PRNs por linha)", key="gen_duas_zip", type="secondary", use_container_width=True):
+                        try:
+                            zip_bytes, zip_name = gerar_duas_zip_primeira_aba(uploaded_xl_d, zip_name="Duas_PRNs.zip")
+                            st.success("Arquivo **ZIP** com PRNs individuais gerado!")
+                            st.download_button("Baixar Duas_PRNs.zip", data=zip_bytes, file_name=zip_name,
+                                               mime="application/zip", use_container_width=True, key="dl_duas_zip")
+                        except Exception as e:
+                            st.error("Falha ao gerar ZIP com PRNs individuais (DUAS)")
                             st.exception(e)
 
                     if st.button("Gerar Duas.xlsx", key="gen_duas_xlsx1", use_container_width=True):
@@ -1013,7 +1027,7 @@ def render():
                             st.error("Falha ao gerar Adicionales.prn")
                             st.exception(e)
 
-                    # >>> ADIÇÃO XLSX (1ª aba)
+                    # XLSX (1ª aba)
                     if st.button("Gerar Adicionales.xlsx", key="gen_adic_xlsx1", use_container_width=True):
                         try:
                             xlsx_adic_1 = gerar_adicionales_xlsx_primeira_aba(uploaded_xl_g)
@@ -1043,7 +1057,7 @@ def render():
                             st.error("Falha ao gerar AAdicionales.prn")
                             st.exception(e)
 
-                    # >>> ADIÇÃO XLSX (2ª aba)
+                    # XLSX (2ª aba)
                     if st.button("Gerar AAdicionales.xlsx", key="gen_adic_xlsx2", use_container_width=True):
                         try:
                             xlsx_adic_2 = gerar_adicionales_xlsx_segunda_aba(uploaded_xl_g)
