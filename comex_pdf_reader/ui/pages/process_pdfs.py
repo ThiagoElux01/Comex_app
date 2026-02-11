@@ -81,8 +81,27 @@ if not EXTERNOS_AVAILABLE:
 # -----------------------------
 from io import BytesIO
 import pandas as pd
-
 from openpyxl.utils import get_column_letter
+from openpyxl.styles import PatternFill, Font
+
+# ============================
+# CONFIG: Espelhar larguras PRN nos XLSX
+# ============================
+USE_PRN_WIDTHS = True  # <- altere para False se quiser voltar ao autoajuste
+
+# Larguras fixas (em "caracteres", aproximadas ao Excel) - iguais aos PRN
+PRN_WIDTHS_1 = [10, 25, 6, 6, 6, 16, 16, 2, 5, 16, 3, 2, 30, 6, 3, 3, 8, 3, 6, 4, 16, 16, 3, 6]  # 24 colunas
+PRN_WIDTHS_2 = [6, 3, 3, 8, 3, 16, 16, 2, 30, 6, 15, 20, 5]                                      # 13 colunas
+
+def set_fixed_widths(ws, widths, start_col: int = 1):
+    """
+    Aplica larguras fixas (em 'caracteres') por coluna, similares às usadas nos PRN.
+    widths: lista de inteiros/float (ex.: [10,25,6,...])
+    start_col: 1 para começar na coluna A; 3 significaria começar em C, etc.
+    """
+    for i, w in enumerate(widths, start=start_col):
+        col_letter = get_column_letter(i)
+        ws.column_dimensions[col_letter].width = float(w)
 
 def _autofit_worksheet(ws, font_padding: float = 1.2, min_width: float = 8.0, max_width: float = 60.0):
     if ws.max_column is None or ws.max_row is None:
@@ -97,12 +116,11 @@ def _autofit_worksheet(ws, font_padding: float = 1.2, min_width: float = 8.0, ma
             val = cell.value
             if val is None:
                 continue
+            # para cálculo de comprimento apenas
             text = f"{val:.6g}" if isinstance(val, float) else str(val)
             max_len = max(max_len, len(text))
         width = min(max(max_len * font_padding, min_width), max_width)
         ws.column_dimensions[get_column_letter(col_idx)].width = width
-
-from openpyxl.styles import PatternFill, Font
 
 def header_paint(ws):
     BLUE = "FF0077B6"
@@ -130,7 +148,16 @@ def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Tasa") -> bytes:
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name=sheet_name)
         ws = writer.book[sheet_name]
-        _autofit_worksheet(ws)
+        # Se quisermos espelhar PRN quando a contagem for 24 ou 13, aplicamos; senão, autoajuste
+        if USE_PRN_WIDTHS:
+            if df.shape[1] == 24:
+                set_fixed_widths(ws, PRN_WIDTHS_1, start_col=1)
+            elif df.shape[1] == 13:
+                set_fixed_widths(ws, PRN_WIDTHS_2, start_col=1)
+            else:
+                _autofit_worksheet(ws)
+        else:
+            _autofit_worksheet(ws)
         header_paint(ws)
     buffer.seek(0)
     return buffer.getvalue()
@@ -158,15 +185,23 @@ def to_xlsx_bytes_externos_duas_abas(
 ) -> bytes:
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        # Aba 1 (normal)
         df_normal.to_excel(writer, index=False, sheet_name=sheet_normal)
         ws1 = writer.book[sheet_normal]
-        _autofit_worksheet(ws1)
+        if USE_PRN_WIDTHS and df_normal.shape[1] == 24:
+            set_fixed_widths(ws1, PRN_WIDTHS_1, start_col=1)
+        else:
+            _autofit_worksheet(ws1)
         header_paint(ws1)
 
+        # Aba 2 (espacada)
         df_spaced = df_with_blank_spacers(df_normal, blank_rows=blank_rows)
         df_spaced.to_excel(writer, index=False, sheet_name=sheet_spaced)
         ws2 = writer.book[sheet_spaced]
-        _autofit_worksheet(ws2)
+        if USE_PRN_WIDTHS and df_spaced.shape[1] == 24:
+            set_fixed_widths(ws2, PRN_WIDTHS_1, start_col=1)
+        else:
+            _autofit_worksheet(ws2)
         header_paint(ws2)
     buffer.seek(0)
     return buffer.getvalue()
@@ -240,7 +275,7 @@ def gerar_externos_prn_primeira_aba(xls_file):
             return ""
         return ""
 
-    widths = [10,25,6,6,6,16,16,2,5,16,3,2,30,6,3,3,8,3,6,4,16,16,3,6]
+    widths = PRN_WIDTHS_1[:]  # 24 colunas
 
     rows_values = []
     for r in range(3, 1501, 4):
@@ -249,7 +284,7 @@ def gerar_externos_prn_primeira_aba(xls_file):
             row_vals = [get_cell(r, c) for c in range(3, 27)]
             rows_values.append(row_vals)
 
-    DEC2_COLS = {5, 6, 9, 20, 21}  # F, G, J, U, V
+    DEC2_COLS = {5, 6, 9, 20, 21}  # F, G, J, U, V (0-based)
     def fmt(col_idx, value):
         if col_idx in DEC2_COLS:
             return _format_decimal_2_dot(value)
@@ -298,9 +333,9 @@ def gerar_externos_prn_segunda_aba(xls_file):
             continue
         rows_clean.append(vals)
 
-    widths2 = [6,3,3,8,3,16,16,2,30,6,15,20,5]
+    widths2 = PRN_WIDTHS_2[:]  # 13 colunas
 
-    DEC2_COLS = {5}  # apenas F
+    DEC2_COLS = {5}  # apenas F (0-based)
     def fmt(col_idx, value):
         if col_idx in DEC2_COLS:
             return _format_decimal_2_dot(value)
@@ -325,7 +360,7 @@ def gerar_adicionales_prn_primeira_aba(xls_file):
             return ""
         return ""
 
-    widths = [10,25,6,6,6,16,16,2,5,16,3,2,30,6,3,3,8,3,6,4,16,16,3,6]
+    widths = PRN_WIDTHS_1[:]  # 24 colunas
 
     rows_values = []
     for r in range(3, 1501, 4):
@@ -334,7 +369,7 @@ def gerar_adicionales_prn_primeira_aba(xls_file):
             row_vals = [get_cell(r, c) for c in range(3, 27)]
             rows_values.append(row_vals)
 
-    DEC2_COLS = {5, 6, 9, 20, 21}  # F, G, J, U, V
+    DEC2_COLS = {5, 6, 9, 20, 21}
     def fmt(col_idx, value):
         if col_idx in DEC2_COLS:
             return _format_decimal_2_dot(value)
@@ -362,7 +397,7 @@ def gerar_adicionales_zip_primeira_aba(xls_file, zip_name="Adicionales_PRNs.zip"
             return ""
         return ""
 
-    widths = [10,25,6,6,6,16,16,2,5,16,3,2,30,6,3,3,8,3,6,4,16,16,3,6]
+    widths = PRN_WIDTHS_1[:]  # 24 colunas
 
     buffer_zip = BytesIO()
     with ZipFile(buffer_zip, mode="w", compression=ZIP_DEFLATED) as zf:
@@ -414,7 +449,16 @@ def _rows_to_xlsx_bytes(rows, headers, sheet_name, decimal_cols_idx=None):
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         df_out.to_excel(writer, index=False, sheet_name=sheet_name)
         ws = writer.book[sheet_name]
-        _autofit_worksheet(ws)
+        # Aplica PRN widths quando possível
+        if USE_PRN_WIDTHS:
+            if len(headers) == 24:
+                set_fixed_widths(ws, PRN_WIDTHS_1, start_col=1)
+            elif len(headers) == 13:
+                set_fixed_widths(ws, PRN_WIDTHS_2, start_col=1)
+            else:
+                _autofit_worksheet(ws)
+        else:
+            _autofit_worksheet(ws)
         header_paint(ws)
     buffer.seek(0)
     return buffer.getvalue()
@@ -490,7 +534,7 @@ def gerar_externos_xlsx_segunda_aba(xls_file):
 # ADICIONALES 1ª aba -> XLSX
 def gerar_adicionales_xlsx_primeira_aba(xls_file):
     # reaproveita a mesma lógica de leitura da 1ª aba
-    return gerar_externos_xlsx_primeira_aba(xls_file).rstrip(b"")  # apenas retorna bytes
+    return gerar_externos_xlsx_primeira_aba(xls_file).rstrip(b"")
 
 # ADICIONALES 2ª aba -> XLSX
 def gerar_adicionales_xlsx_segunda_aba(xls_file):
@@ -686,7 +730,11 @@ def render():
                     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
                         df_all.to_excel(writer, index=False, sheet_name="SharePoint")
                         ws = writer.book["SharePoint"]
-                        _autofit_worksheet(ws)
+                        if USE_PRN_WIDTHS and df_all.shape[1] in (24, 13):
+                            # só aplica PRN widths se bater com 24 ou 13; senão, autoajuste
+                            set_fixed_widths(ws, PRN_WIDTHS_1 if df_all.shape[1] == 24 else PRN_WIDTHS_2, start_col=1)
+                        else:
+                            _autofit_worksheet(ws)
                     buffer.seek(0)
                     st.download_button("Baixar XLSX (SharePoint)", data=buffer, file_name="sharepoint_all.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key="sharepoint_xlsx")
             except ValueError:
