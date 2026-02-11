@@ -933,75 +933,109 @@ def render():
                             st.exception(e)
 
         # -------------------- FLUXO DUAS --------------------
-        elif flow == "duas":
-            st.info("Fluxo **DUAS** selecionado. Carregue o arquivo Excel.")
-            uploaded_xl_d = st.file_uploader(
-                "Carregar Excel (.xlsx ou .xls) para gerar PRN/XLSX",
-                type=["xlsx", "xls"],
-                key="prn_duas_upl",
-                accept_multiple_files=False,
-                help="1ª aba -> Duas.prn/.xlsx | 2ª aba -> ADuas.prn/.xlsx"
-            )
-
-            if uploaded_xl_d is not None:
-                c1, c2 = st.columns(2)
-
-                # -------- PRIMEIRA ABA --------
-                with c1:
-                    if st.button("Gerar Duas.prn", key="gen_duas_prn1", type="primary", use_container_width=True):
-                        try:
-                            prn_bytes = gerar_duas_prn_primeira_aba(uploaded_xl_d)
-                            st.success("Arquivo **Duas.prn** gerado!")
-                            st.download_button("Baixar Duas.prn", data=prn_bytes, file_name="Duas.prn",
-                                               mime="text/plain", use_container_width=True, key="dl_duas_prn1")
-                        except Exception as e:
-                            st.error("Falha ao gerar Duas.prn")
-                            st.exception(e)
-
-                    # NOVO: ZIP PRNs por linha (1ª aba)
-                    if st.button("Gerar ZIP (PRNs por linha)", key="gen_duas_zip", type="secondary", use_container_width=True):
-                        try:
-                            zip_bytes, zip_name = gerar_duas_zip_primeira_aba(uploaded_xl_d, zip_name="Duas_PRNs.zip")
-                            st.success("Arquivo **ZIP** com PRNs individuais gerado!")
-                            st.download_button("Baixar Duas_PRNs.zip", data=zip_bytes, file_name=zip_name,
-                                               mime="application/zip", use_container_width=True, key="dl_duas_zip")
-                        except Exception as e:
-                            st.error("Falha ao gerar ZIP com PRNs individuais (DUAS)")
-                            st.exception(e)
-
-                    if st.button("Gerar Duas.xlsx", key="gen_duas_xlsx1", use_container_width=True):
-                        try:
-                            xlsx1 = gerar_duas_xlsx_primeira_aba(uploaded_xl_d)
-                            st.success("Arquivo **Duas.xlsx** gerado!")
-                            st.download_button("Baixar Duas.xlsx", data=xlsx1, file_name="Duas.xlsx",
-                                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                               use_container_width=True, key="dl_duas_xlsx1")
-                        except Exception as e:
-                            st.error("Falha ao gerar Duas.xlsx")
-                            st.exception(e)
-
-                # -------- SEGUNDA ABA --------
-                with c2:
-                    if st.button("Gerar ADuas.prn", key="gen_duas_prn2", use_container_width=True):
-                        try:
-                            prn_bytes2 = gerar_duas_prn_segunda_aba(uploaded_xl_d)
-                            st.success("Arquivo **ADuas.prn** gerado!")
-                            st.download_button("Baixar ADuas.prn", data=prn_bytes2, file_name="ADuas.prn",
-                                               mime="text/plain", use_container_width=True, key="dl_duas_prn2")
-                        except Exception as e:
-                            st.error("Falha ao gerar ADuas.prn")
-                            st.exception(e)
-
-                    if st.button("Gerar ADuas.xlsx", key="gen_duas_xlsx2", use_container_width=True):
-                        try:
-                            xlsx2 = gerar_duas_xlsx_segunda_aba(uploaded_xl_d)
-                            st.success("Arquivo **ADuas.xlsx** gerado!")
-                            st.download_button("Baixar ADuas.xlsx", data=xlsx2, file_name="ADuas.xlsx",
-                                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                               use_container_width=True, key="dl_duas_xlsx2")
-                        except Exception as e:
-                            st.error("Falha ao gerar ADuas.xlsx")
-                            st.exception(e)
+# -------------------- FLUXO DUAS --------------------
+    elif flow == "duas":
+        st.info("Fluxo **DUAS** selecionado. Carregue o arquivo Excel.")
+        uploaded_xl_d = st.file_uploader(
+            "Carregar Excel (.xlsx ou .xls) para gerar PRN/XLSX",
+            type=["xlsx", "xls"],
+            key="prn_duas_upl",
+            accept_multiple_files=False,
+            help="1ª aba -> Duas.prn/.xlsx | 2ª aba -> ADuas.prn/.xlsx"
+        )
+    
+        if uploaded_xl_d is not None:
+            # Mantém a mesma disposição visual do fluxo Adicionales: 3 colunas
+            c1, c2, c3 = st.columns(3)
+    
+            # -------- PRIMEIRA ABA --------
+            with c1:
+                if st.button("Gerar Duas.prn", key="gen_duas_prn1", type="primary", use_container_width=True):
+                    try:
+                        prn_bytes = gerar_duas_prn_primeira_aba(uploaded_xl_d)
+                        st.success("Arquivo **Duas.prn** gerado!")
+                        st.download_button(
+                            "Baixar Duas.prn",
+                            data=prn_bytes,
+                            file_name="Duas.prn",
+                            mime="text/plain",
+                            use_container_width=True,
+                            key="dl_duas_prn1"
+                        )
+                    except Exception as e:
+                        st.error("Falha ao gerar Duas.prn")
+                        st.exception(e)
+    
+                if st.button("Gerar Duas.xlsx", key="gen_duas_xlsx1", use_container_width=True):
+                    try:
+                        xlsx1 = gerar_duas_xlsx_primeira_aba(uploaded_xl_d)
+                        st.success("Arquivo **Duas.xlsx** gerado!")
+                        st.download_button(
+                            "Baixar Duas.xlsx",
+                            data=xlsx1,
+                            file_name="Duas.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                            key="dl_duas_xlsx1"
+                        )
+                    except Exception as e:
+                        st.error("Falha ao gerar Duas.xlsx")
+                        st.exception(e)
+    
+            # -------- ZIP (PRNs por linha) – fica no centro, como no Adicionales --------
+            with c2:
+                if st.button("Gerar ZIP (PRNs por linha)", key="gen_duas_zip", type="secondary", use_container_width=True):
+                    try:
+                        zip_bytes, zip_name = gerar_duas_zip_primeira_aba(
+                            uploaded_xl_d,
+                            zip_name="Duas_PRNs.zip"
+                        )
+                        st.success("Arquivo **ZIP** com PRNs individuais gerado!")
+                        st.download_button(
+                            "Baixar Duas_PRNs.zip",
+                            data=zip_bytes,
+                            file_name=zip_name,
+                            mime="application/zip",
+                            use_container_width=True,
+                            key="dl_duas_zip"
+                        )
+                    except Exception as e:
+                        st.error("Falha ao gerar ZIP com PRNs individuais (DUAS)")
+                        st.exception(e)
+    
+            # -------- SEGUNDA ABA --------
+            with c3:
+                if st.button("Gerar ADuas.prn", key="gen_duas_prn2", use_container_width=True):
+                    try:
+                        prn_bytes2 = gerar_duas_prn_segunda_aba(uploaded_xl_d)
+                        st.success("Arquivo **ADuas.prn** gerado!")
+                        st.download_button(
+                            "Baixar ADuas.prn",
+                            data=prn_bytes2,
+                            file_name="ADuas.prn",
+                            mime="text/plain",
+                            use_container_width=True,
+                            key="dl_duas_prn2"
+                        )
+                    except Exception as e:
+                        st.error("Falha ao gerar ADuas.prn")
+                        st.exception(e)
+    
+                if st.button("Gerar ADuas.xlsx", key="gen_duas_xlsx2", use_container_width=True):
+                    try:
+                        xlsx2 = gerar_duas_xlsx_segunda_aba(uploaded_xl_d)
+                        st.success("Arquivo **ADuas.xlsx** gerado!")
+                        st.download_button(
+                            "Baixar ADuas.xlsx",
+                            data=xlsx2,
+                            file_name="ADuas.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                            key="dl_duas_xlsx2"
+                        )
+                    except Exception as e:
+                        st.error("Falha ao gerar ADuas.xlsx")
+                        st.exception(e)
 
         # -------------------- FLUXO GASTOS ADICIONALES --------------------
         elif flow == "gastos":
