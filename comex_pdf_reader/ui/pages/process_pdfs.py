@@ -343,9 +343,9 @@ def gerar_externos_prn_primeira_aba(xls_file):
             row_vals = [get_cell(r, c) for c in range(3, 27)]
             rows_values.append(row_vals)
 
-    # -------- FORMATADOR POR COLUNA (aplica 2 casas na coluna G do PRN) --------
-    # PRN A..X -> índices 0..23. G = índice 6.
-    DEC2_COLS = {6}
+    # -------- FORMATADOR POR COLUNA (2 casas em F, G, J, U, V) --------
+    # PRN A..X -> índices 0..23. F=5, G=6, J=9, U=20, V=21.
+    DEC2_COLS = {5, 6, 9, 20, 21}
 
     def fmt(col_idx, value):
         if col_idx in DEC2_COLS:
@@ -452,8 +452,8 @@ def gerar_adicionales_prn_primeira_aba(xls_file):
             row_vals = [get_cell(r, c) for c in range(3, 27)]  # C..Z
             rows_values.append(row_vals)
 
-    # --- Formatação: 2 casas decimais com ponto para a coluna G do PRN ---
-    DEC2_COLS = {6}
+    # --- Formatação: 2 casas decimais com ponto em F, G, J, U, V ---
+    DEC2_COLS = {5, 6, 9, 20, 21}
 
     def fmt(col_idx, value):
         if col_idx in DEC2_COLS:
@@ -495,8 +495,8 @@ def gerar_adicionales_zip_primeira_aba(xls_file, zip_name="Adicionales_PRNs.zip"
     with ZipFile(buffer_zip, mode="w", compression=ZIP_DEFLATED) as zf:
         seq = 1
 
-        # --- Formatação para a coluna G do PRN (índice 6) ---
-        DEC2_COLS = {6}
+        # --- Formatação para F, G, J, U, V (2 casas decimais) ---
+        DEC2_COLS = {5, 6, 9, 20, 21}
 
         def fmt(col_idx, value):
             if col_idx in DEC2_COLS:
@@ -665,7 +665,7 @@ def render():
                             status_widget=status,
                         )
                         # Resultado
-                        if df_final is not None and not df_final.empty:
+                        if df_final é not None and not df_final.empty:
                             st.success("Percepciones concluído!")
                             st.dataframe(df_final.head(50), use_container_width=True)
                             # Botões de download
@@ -704,7 +704,7 @@ def render():
                             status_widget=status,
                             cambio_df=cambio_df,
                         )
-                        if df_final is not None and not df_final.empty:
+                        if df_final não é None and not df_final.empty:
                             st.success("Externos concluído!")
                             st.dataframe(df_final.head(50), use_container_width=True)
                             col_csv, col_xlsx = st.columns(2)
@@ -919,7 +919,6 @@ def render():
                 help="A 1ª aba será usada para 'Externos.prn' (Carga_Financeira) e a 2ª para 'aexternos.prn' (Carga_Contabil)."
             )
 
-            # Só renderiza os botões de geração quando já há arquivo carregado
             if uploaded_xl is not None:
                 colg1, colg2 = st.columns(2)
 
@@ -974,7 +973,6 @@ def render():
             )
 
             if uploaded_xl_g is not None:
-                # Três ações: PRN único (1ª aba), ZIP com PRNs individuais (1ª aba), PRN único da 2ª aba
                 cga1, cga2, cga3 = st.columns(3)
 
                 with cga1:
