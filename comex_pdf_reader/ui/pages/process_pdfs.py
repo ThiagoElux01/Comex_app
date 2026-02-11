@@ -665,7 +665,7 @@ def render():
                             status_widget=status,
                         )
                         # Resultado
-                        if df_final é not None and not df_final.empty:
+                        if df_final is not None and not df_final.empty:
                             st.success("Percepciones concluído!")
                             st.dataframe(df_final.head(50), use_container_width=True)
                             # Botões de download
@@ -704,7 +704,7 @@ def render():
                             status_widget=status,
                             cambio_df=cambio_df,
                         )
-                        if df_final não é None and not df_final.empty:
+                        if df_final is not None and not df_final.empty:
                             st.success("Externos concluído!")
                             st.dataframe(df_final.head(50), use_container_width=True)
                             col_csv, col_xlsx = st.columns(2)
@@ -919,6 +919,7 @@ def render():
                 help="A 1ª aba será usada para 'Externos.prn' (Carga_Financeira) e a 2ª para 'aexternos.prn' (Carga_Contabil)."
             )
 
+            # Só renderiza os botões de geração quando já há arquivo carregado
             if uploaded_xl is not None:
                 colg1, colg2 = st.columns(2)
 
@@ -973,6 +974,7 @@ def render():
             )
 
             if uploaded_xl_g is not None:
+                # Três ações: PRN único (1ª aba), ZIP com PRNs individuais (1ª aba), PRN único da 2ª aba
                 cga1, cga2, cga3 = st.columns(3)
 
                 with cga1:
@@ -1025,4 +1027,3 @@ def render():
                         except Exception as e:
                             st.error("Falha ao gerar AAdicionales.prn")
                             st.exception(e)
-                        
