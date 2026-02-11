@@ -15,7 +15,7 @@ def render():
     st.subheader("📦 Arquivos modelo")
     st.caption("Baixe os templates em Excel (.xlsx) para preparar os dados.")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         st.download_button(
@@ -44,5 +44,13 @@ def render():
             use_container_width=True,
         )
 
+    with col4:
+        st.download_button(
+            label="⬇️ Comex Report (XLSX)",
+            data=_read_file_bytes("comex.xlsx"),
+            file_name="comex.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
     st.divider()
     st.info("Nesta página é possível baixar os arquivos modelo esperados por cada fluxo.")
