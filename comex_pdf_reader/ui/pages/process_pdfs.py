@@ -82,7 +82,7 @@ if not EXTERNOS_AVAILABLE:
 from io import BytesIO
 import pandas as pd
 
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # INCLUSÃO: utilitário para ajustar largura ("autofit") das colunas no Excel
 from openpyxl.utils import get_column_letter
 
@@ -248,6 +248,7 @@ def _select_action(action_key: str):
 
 # ================== NOVOS HELPERS (PRN) ==================
 import math
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP  # <-- ADICIONADO
 
 def _to_str(x):
     """Converte para str, mantendo vazio em None/NaN."""
@@ -258,26 +259,48 @@ def _to_str(x):
     s = str(x)
     return "" if s.strip() in {"nan", "NaN"} else s
 
-def _fixed_width_line(values, widths):
+# --------- ADICIONADO: formatador decimal com 2 casas e ponto ---------
+def _format_decimal_2_dot(value):
+    """
+    Converte para Decimal e formata com 2 casas usando ponto como separador.
+    Aceita entrada com vírgula ou ponto.
+    """
+    if value is None:
+        return ""
+    txt = str(value).strip()
+    if txt == "":
+        return ""
+    txt_norm = txt.replace(",", ".")
+    try:
+        d = Decimal(txt_norm)
+    except (InvalidOperation, ValueError):
+        # Se não for número, devolve como texto (não quebra layouts mistos)
+        return txt
+    d2 = d.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return f"{d2}"  # ponto como separador (ex.: 123.40)
+
+def _fixed_width_line(values, widths, fmt=None):
     """
     Monta uma linha em largura fixa (padding à direita com espaço).
-    - values: lista de strings
+    - values: lista de strings/valores
     - widths: lista de inteiros, mesma qtde que values
+    - fmt: callable opcional (col_idx:int, value:any) -> str (para formatar colunas específicas)
     """
     out = []
-    for v, w in zip(values, widths):
-        s = _to_str(v)
+    for idx, (v, w) in enumerate(zip(values, widths)):
+        sv = fmt(idx, v) if fmt else _to_str(v)
         # Excel salva como texto: truncamos se exceder e preenchemos com espaços
-        s = s[:w]
-        out.append(s + (" " * max(0, w - len(s))))
+        sv = sv[:w]
+        out.append(sv + (" " * max(0, w - len(sv))))
     return "".join(out)
 
-def _df_to_prn_bytes(rows_values, widths, encoding="cp1252"):
+def _df_to_prn_bytes(rows_values, widths, encoding="cp1252", fmt=None):
     """
     Converte uma lista de 'values por linha' num PRN de largura fixa.
     Retorna bytes (para usar no st.download_button).
+    - fmt: callable opcional para formatar valores por coluna
     """
-    lines = [_fixed_width_line(vals, widths) for vals in rows_values]
+    lines = [_fixed_width_line(vals, widths, fmt=fmt) for vals in rows_values]
     # Usamos CRLF como geralmente o Excel (Text Printer) gera.
     text = "\r\n".join(lines) + "\r\n"
     return text.encode(encoding, errors="replace")
@@ -309,7 +332,7 @@ def gerar_externos_prn_primeira_aba(xls_file):
             return ""
         return ""
 
-    # Larguras A..X (24 colunas), exatamente como na tua macro
+    # Larguras A..X (24 colunas), exatamente como na sua macro
     widths = [10, 25, 6, 6, 6, 16, 16, 2, 5, 16, 3, 2, 30, 6, 3, 3, 8, 3, 6, 4, 16, 16, 3, 6]
 
     rows_values = []
@@ -320,7 +343,16 @@ def gerar_externos_prn_primeira_aba(xls_file):
             row_vals = [get_cell(r, c) for c in range(3, 27)]
             rows_values.append(row_vals)
 
-    prn_bytes = _df_to_prn_bytes(rows_values, widths, encoding="cp1252")
+    # -------- FORMATADOR POR COLUNA (aplica 2 casas na coluna G do PRN) --------
+    # PRN A..X -> índices 0..23. G = índice 6.
+    DEC2_COLS = {6}
+
+    def fmt(col_idx, value):
+        if col_idx in DEC2_COLS:
+            return _format_decimal_2_dot(value)
+        return _to_str(value)
+
+    prn_bytes = _df_to_prn_bytes(rows_values, widths, encoding="cp1252", fmt=fmt)
     return prn_bytes  # para "Externos.prn"
 
 # ------------------- EXTERNOS: 2ª ABA (equivalente Carga_Contabil) -------------------
@@ -381,7 +413,7 @@ def gerar_externos_prn_segunda_aba(xls_file):
             continue
         rows_clean.append(vals)
 
-    # 4) Larguras A..M (13 colunas), como na tua macro
+    # 4) Larguras A..M (13 colunas), como na sua macro
     widths2 = [6, 3, 3, 8, 3, 16, 16, 2, 30, 6, 15, 20, 5]
     prn_bytes = _df_to_prn_bytes(rows_clean, widths2, encoding="cp1252")
     return prn_bytes  # para "aexternos.prn"
@@ -415,15 +447,22 @@ def gerar_adicionales_prn_primeira_aba(xls_file):
 
     rows_values = []
     for r in range(3, 1501, 4):
-        val_c = _to_str(get_cell(r, 3))  # coluna C
+        val_c = _to_str(get_cell(r, 3))  # coluna C é a A do arquivo temporário na sua macro
         if val_c != "":
             row_vals = [get_cell(r, c) for c in range(3, 27)]  # C..Z
             rows_values.append(row_vals)
 
-    # PRN único (todas as linhas)
-    prn_bytes = _df_to_prn_bytes(rows_values, widths, encoding="cp1252")
-    return prn_bytes  # "Adicionales.prn"
+    # --- Formatação: 2 casas decimais com ponto para a coluna G do PRN ---
+    DEC2_COLS = {6}
 
+    def fmt(col_idx, value):
+        if col_idx in DEC2_COLS:
+            return _format_decimal_2_dot(value)
+        return _to_str(value)
+
+    # PRN único (todas as linhas)
+    prn_bytes = _df_to_prn_bytes(rows_values, widths, encoding="cp1252", fmt=fmt)
+    return prn_bytes  # "Adicionales.prn"
 
 # ------------------- ADICIONALES: 1ª ABA (PRNs individuais -> ZIP) -------------------
 def gerar_adicionales_zip_primeira_aba(xls_file, zip_name="Adicionales_PRNs.zip"):
@@ -455,13 +494,23 @@ def gerar_adicionales_zip_primeira_aba(xls_file, zip_name="Adicionales_PRNs.zip"
     buffer_zip = BytesIO()
     with ZipFile(buffer_zip, mode="w", compression=ZIP_DEFLATED) as zf:
         seq = 1
+
+        # --- Formatação para a coluna G do PRN (índice 6) ---
+        DEC2_COLS = {6}
+
+        def fmt(col_idx, value):
+            if col_idx in DEC2_COLS:
+                return _format_decimal_2_dot(value)
+            return _to_str(value)
+
         for r in range(3, 1501, 4):
-            val_c = _to_str(get_cell(r, 3))  # coluna C é a A do arquivo temporário na tua macro
+            val_c = _to_str(get_cell(r, 3))  # coluna C é a A do arquivo temporário na sua macro
             if val_c == "":
                 continue
 
             row_vals = [get_cell(r, c) for c in range(3, 27)]
-            prn_bytes = _df_to_prn_bytes([row_vals], widths, encoding="cp1252")  # 1 linha -> 1 arquivo
+            prn_bytes = _df_to_prn_bytes([row_vals], widths, encoding="cp1252", fmt=fmt)  # 1 linha -> 1 arquivo
+
             # Sanitize para nome de arquivo
             safe_prefix = (val_c or "linha").replace("\\", "_").replace("/", "_").replace(" ", "")
             filename = f"{safe_prefix}_{seq}.prn"
@@ -470,7 +519,6 @@ def gerar_adicionales_zip_primeira_aba(xls_file, zip_name="Adicionales_PRNs.zip"
 
     buffer_zip.seek(0)
     return buffer_zip.getvalue(), zip_name  # ZIP em bytes + nome padrão
-
 
 # ------------------- ADICIONALES: 2ª ABA (igual Aexternos.prn) -------------------
 def gerar_adicionales_prn_segunda_aba(xls_file):
@@ -914,8 +962,7 @@ def render():
             st.info("Fluxo **Duas** selecionado. (Em breve: lógica específica para gerar PRN a partir do Excel.)")
             st.caption("Se quiser, já me passe a macro/algoritmo e eu programo aqui.")
 
-        # -------------------- FLUXO GASTOS ADICIONALES (placeholder) --------------------
-# -------------------- FLUXO GASTOS ADICIONALES --------------------
+        # -------------------- FLUXO GASTOS ADICIONALES --------------------
         elif flow == "gastos":
             st.info("Fluxo **Gastos Adicionales** selecionado. Carregue o arquivo Excel.")
             uploaded_xl_g = st.file_uploader(
