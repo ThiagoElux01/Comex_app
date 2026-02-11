@@ -12,7 +12,6 @@ try:
 except Exception as e:
     ADICIONALES_AVAILABLE = False
     ADICIONALES_ERR = e
-
 if not ADICIONALES_AVAILABLE:
     st.warning(
         "Módulo **Gastos Adicionales** não pôde ser carregado. "
@@ -32,7 +31,6 @@ try:
 except Exception as e:
     PERC_AVAILABLE = False
     PERC_ERR = e
-
 if not PERC_AVAILABLE:
     st.warning(
         "Módulo **Percepciones** não pôde ser carregado. "
@@ -49,7 +47,6 @@ try:
 except Exception as e:
     DUAS_AVAILABLE = False
     DUAS_ERR = e
-
 # AVISO se o módulo DUAS não carregou (mas mantém os botões visíveis)
 if not DUAS_AVAILABLE:
     st.warning(
@@ -67,7 +64,6 @@ try:
 except Exception as e:
     EXTERNOS_AVAILABLE = False
     EXTERNOS_ERR = e
-
 if not EXTERNOS_AVAILABLE:
     st.warning(
         "Módulo **Externos** não pôde ser carregado. "
@@ -88,10 +84,10 @@ from openpyxl.styles import PatternFill, Font
 # CONFIG: Espelhar larguras PRN nos XLSX
 # ============================
 USE_PRN_WIDTHS = True  # <- altere para False se quiser voltar ao autoajuste
-
 # Larguras fixas (em "caracteres", aproximadas ao Excel) - iguais aos PRN
 PRN_WIDTHS_1 = [10, 25, 6, 6, 6, 16, 16, 2, 5, 16, 3, 2, 30, 6, 3, 3, 8, 3, 6, 4, 16, 16, 3, 6]  # 24 colunas
-PRN_WIDTHS_2 = [6, 3, 3, 8, 3, 16, 16, 2, 30, 6, 15, 20, 5]                                      # 13 colunas
+PRN_WIDTHS_2 = [6, 3, 3, 8, 3, 16, 16, 2, 30, 6, 15, 20, 5]  # 13 colunas
+
 
 def set_fixed_widths(ws, widths, start_col: int = 1, add_excel_padding: bool = True):
     """
@@ -103,6 +99,7 @@ def set_fixed_widths(ws, widths, start_col: int = 1, add_excel_padding: bool = T
     for i, w in enumerate(widths, start=start_col):
         col_letter = get_column_letter(i)
         ws.column_dimensions[col_letter].width = float(w) + PADDING
+
 
 def _autofit_worksheet(ws, font_padding: float = 1.2, min_width: float = 8.0, max_width: float = 60.0):
     if ws.max_column is None or ws.max_row is None:
@@ -123,12 +120,12 @@ def _autofit_worksheet(ws, font_padding: float = 1.2, min_width: float = 8.0, ma
         width = min(max(max_len * font_padding, min_width), max_width)
         ws.column_dimensions[get_column_letter(col_idx)].width = width
 
+
 def header_paint(ws):
     BLUE = "FF0077B6"
     WHITE = "FFFFFFFF"
     fill_blue = PatternFill(fill_type="solid", start_color=BLUE, end_color=BLUE)
     font_white_bold = Font(color=WHITE, bold=True)
-
     exact_headers = {
         "source_file","Proveedor","Proveedor Iscala","Factura","Tipo Doc","Cód. de Autorización",
         "Tipo de Factura","Fecha de Emisión","Moneda","Cod. Moneda","Amount","Tasa","Cuenta",
@@ -143,6 +140,7 @@ def header_paint(ws):
         if header_text in exact_headers:
             cell.fill = fill_blue
             cell.font = font_white_bold
+
 
 def to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Tasa") -> bytes:
     buffer = BytesIO()
@@ -177,6 +175,7 @@ def df_with_blank_spacers(df: pd.DataFrame, blank_rows: int = 3) -> pd.DataFrame
             blocks.append(blank.copy())
     out = pd.concat(blocks, ignore_index=True)
     return out
+
 
 def to_xlsx_bytes_externos_duas_abas(
     df_normal: pd.DataFrame,
@@ -277,7 +276,6 @@ def gerar_externos_prn_primeira_aba(xls_file):
         return ""
 
     widths = PRN_WIDTHS_1[:]  # 24 colunas
-
     rows_values = []
     for r in range(3, 1501, 4):
         val_c = _to_str(get_cell(r, 3))
@@ -335,7 +333,6 @@ def gerar_externos_prn_segunda_aba(xls_file):
         rows_clean.append(vals)
 
     widths2 = PRN_WIDTHS_2[:]  # 13 colunas
-
     DEC2_COLS = {5}  # apenas F (0-based)
     def fmt(col_idx, value):
         if col_idx in DEC2_COLS:
@@ -362,7 +359,6 @@ def gerar_adicionales_prn_primeira_aba(xls_file):
         return ""
 
     widths = PRN_WIDTHS_1[:]  # 24 colunas
-
     rows_values = []
     for r in range(3, 1501, 4):
         val_c = _to_str(get_cell(r, 3))
@@ -399,7 +395,6 @@ def gerar_adicionales_zip_primeira_aba(xls_file, zip_name="Adicionales_PRNs.zip"
         return ""
 
     widths = PRN_WIDTHS_1[:]  # 24 colunas
-
     buffer_zip = BytesIO()
     with ZipFile(buffer_zip, mode="w", compression=ZIP_DEFLATED) as zf:
         seq = 1
@@ -415,7 +410,6 @@ def gerar_adicionales_zip_primeira_aba(xls_file, zip_name="Adicionales_PRNs.zip"
                 continue
             row_vals = [get_cell(r, c) for c in range(3, 27)]
             prn_bytes = _df_to_prn_bytes([row_vals], widths, encoding="cp1252", fmt=fmt)
-
             safe_prefix = (val_c or "linha").replace("\\", "_").replace("/", "_").replace(" ", "")
             filename = f"{safe_prefix}_{seq}.prn"
             zf.writestr(filename, prn_bytes)
@@ -429,10 +423,10 @@ def gerar_adicionales_prn_segunda_aba(xls_file):
     return gerar_externos_prn_segunda_aba(xls_file)  # mesma regra
 
 # ================== HELPERS XLSX (novos) ==================
-
 def _rows_to_xlsx_bytes(rows, headers, sheet_name, decimal_cols_idx=None):
     """Converte 'rows' (lista de listas) em XLSX com headers, aplicando 2 casas nas colunas indicadas."""
     decimal_cols_idx = decimal_cols_idx or set()
+
     # normaliza e aplica 2 casas onde necessário
     rows_fmt = []
     for r in rows:
@@ -483,7 +477,6 @@ def gerar_externos_xlsx_primeira_aba(xls_file):
     for r in range(3, 1501, 4):
         if _to_str(get_cell(r, 3)) != "":
             rows.append([get_cell(r, c) for c in range(3, 27)])  # 24 colunas
-
     headers = [f"Col_{chr(65+i)}" for i in range(24)]  # A..X
     decimal_cols = {5, 6, 9, 20, 21}  # F,G,J,U,V
     return _rows_to_xlsx_bytes(rows, headers, "Externos", decimal_cols)
@@ -556,7 +549,6 @@ def gerar_duas_prn_primeira_aba(xls_file):
         return ""
 
     widths = PRN_WIDTHS_1[:]  # 24 colunas
-
     rows = []
     for r in range(3, 1501, 4):
         if _to_str(get_cell(r, 3)) != "":
@@ -687,7 +679,6 @@ def render():
             st.info(f"🔧 Fluxo **{nome_acao}** selecionado.")
         else:
             st.caption("Selecione uma ação acima para enviar PDFs e executar o fluxo correspondente.")
-
         st.divider()
 
         if has_action:
@@ -722,71 +713,169 @@ def render():
                     if not DUAS_AVAILABLE:
                         st.error("DUAS indisponível: confira dependências e arquivo `services/duas_service.py`.")
                     else:
-                        df_final = process_duas_streamlit(uploaded_files=uploaded_files, progress_widget=progress, status_widget=status, cambio_df=cambio_df)
-                        if df_final is not None and not df_final.empty:
-                            st.success("Fluxo DUAS concluído!")
-                            st.dataframe(df_final.head(50), use_container_width=True)
-                            col_csv, col_xlsx = st.columns(2)
-                            with col_csv:
-                                st.download_button("Baixar CSV (DUAS)", data=df_final.to_csv(index=False).encode("utf-8"), file_name="duas_consolidado.csv", mime="text/csv", use_container_width=True, key="duas_csv")
-                            with col_xlsx:
-                                xlsx_bytes = to_xlsx_bytes(df_final, sheet_name="DUAS")
-                                st.download_button("Baixar XLSX (DUAS)", data=xlsx_bytes, file_name="duas_consolidado.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key="duas_xlsx")
-                        else:
-                            st.warning("Nenhuma tabela válida encontrada nos PDFs para o fluxo DUAS.")
+                        df_final = process_duas_streamlit(
+                            uploaded_files=uploaded_files,
+                            progress_widget=progress,
+                            status_widget=status,
+                            cambio_df=cambio_df
+                        )
+                    if df_final is not None and not df_final.empty:
+                        st.success("Fluxo DUAS concluído!")
+                        st.dataframe(df_final.head(50), use_container_width=True)
+                        col_csv, col_xlsx = st.columns(2)
+                        with col_csv:
+                            st.download_button(
+                                "Baixar CSV (DUAS)",
+                                data=df_final.to_csv(index=False).encode("utf-8"),
+                                file_name="duas_consolidado.csv",
+                                mime="text/csv",
+                                use_container_width=True,
+                                key="duas_csv"
+                            )
+                        # ✅ ALTERADO: XLSX com DUAS abas
+                        with col_xlsx:
+                            xlsx_bytes = to_xlsx_bytes_externos_duas_abas(
+                                df_normal=df_final,
+                                sheet_normal="DUAS",
+                                sheet_spaced="DUAS_Espacado",
+                                blank_rows=3
+                            )
+                            st.download_button(
+                                "Baixar XLSX (DUAS)",
+                                data=xlsx_bytes,
+                                file_name="duas_consolidado.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True,
+                                key="duas_xlsx",
+                            )
+                    else:
+                        st.warning("Nenhuma tabela válida encontrada nos PDFs para o fluxo DUAS.")
 
                 elif acao == "percepciones":
                     if not PERC_AVAILABLE:
                         st.error("Percepciones indisponível: confira dependências e `services/percepcion_service.py`.")
                     else:
-                        df_final = process_percepcion_streamlit(uploaded_files=uploaded_files, progress_widget=progress, status_widget=status)
-                        if df_final is not None and not df_final.empty:
-                            st.success("Percepciones concluído!")
-                            st.dataframe(df_final.head(50), use_container_width=True)
-                            col_csv, col_xlsx = st.columns(2)
-                            with col_csv:
-                                st.download_button("Baixar CSV (Percepciones)", data=df_final.to_csv(index=False).encode("utf-8"), file_name="percepciones.csv", mime="text/csv", use_container_width=True, key="percepciones_csv")
-                            with col_xlsx:
-                                xlsx_bytes = to_xlsx_bytes(df_final, sheet_name="Percepciones")
-                                st.download_button("Baixar XLSX (Percepciones)", data=xlsx_bytes, file_name="percepciones.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key="percepciones_xlsx")
-                        else:
-                            st.warning("Nenhuma informação válida encontrada nos PDFs para Percepciones.")
+                        df_final = process_percepcion_streamlit(
+                            uploaded_files=uploaded_files,
+                            progress_widget=progress,
+                            status_widget=status
+                        )
+                    if df_final is not None and not df_final.empty:
+                        st.success("Percepciones concluído!")
+                        st.dataframe(df_final.head(50), use_container_width=True)
+                        col_csv, col_xlsx = st.columns(2)
+                        with col_csv:
+                            st.download_button(
+                                "Baixar CSV (Percepciones)",
+                                data=df_final.to_csv(index=False).encode("utf-8"),
+                                file_name="percepciones.csv",
+                                mime="text/csv",
+                                use_container_width=True,
+                                key="percepciones_csv"
+                            )
+                        # ✅ ALTERADO: XLSX com DUAS abas
+                        with col_xlsx:
+                            xlsx_bytes = to_xlsx_bytes_externos_duas_abas(
+                                df_normal=df_final,
+                                sheet_normal="Percepciones",
+                                sheet_spaced="Percepciones_Espacado",
+                                blank_rows=3
+                            )
+                            st.download_button(
+                                "Baixar XLSX (Percepciones)",
+                                data=xlsx_bytes,
+                                file_name="percepciones.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True,
+                                key="percepciones_xlsx",
+                            )
+                    else:
+                        st.warning("Nenhuma informação válida encontrada nos PDFs para Percepciones.")
 
                 elif acao == "externos":
                     if not EXTERNOS_AVAILABLE:
                         st.error("Externos indisponível: confira dependências e `services/externos_service.py`.")
                     else:
                         cambio_df = st.session_state.get("tasa_df")
-                        df_final = process_externos_streamlit(uploaded_files=uploaded_files, progress_widget=progress, status_widget=status, cambio_df=cambio_df)
-                        if df_final is not None and not df_final.empty:
-                            st.success("Externos concluído!")
-                            st.dataframe(df_final.head(50), use_container_width=True)
-                            col_csv, col_xlsx = st.columns(2)
-                            with col_csv:
-                                st.download_button("Baixar CSV (Externos)", data=df_final.to_csv(index=False).encode("utf-8"), file_name="externos.csv", mime="text/csv", use_container_width=True, key="externos_csv")
-                            with col_xlsx:
-                                xlsx_bytes = to_xlsx_bytes_externos_duas_abas(df_normal=df_final, sheet_normal="Externos", sheet_spaced="Externos_Espacado", blank_rows=3)
-                                st.download_button("Baixar XLSX (Externos)", data=xlsx_bytes, file_name="externos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key="externos_xlsx")
-                        else:
-                            st.warning("Nenhuma informação válida encontrada nos PDFs para Externos.")
+                        df_final = process_externos_streamlit(
+                            uploaded_files=uploaded_files,
+                            progress_widget=progress,
+                            status_widget=status,
+                            cambio_df=cambio_df
+                        )
+                    if df_final is not None and not df_final.empty:
+                        st.success("Externos concluído!")
+                        st.dataframe(df_final.head(50), use_container_width=True)
+                        col_csv, col_xlsx = st.columns(2)
+                        with col_csv:
+                            st.download_button(
+                                "Baixar CSV (Externos)",
+                                data=df_final.to_csv(index=False).encode("utf-8"),
+                                file_name="externos.csv",
+                                mime="text/csv",
+                                use_container_width=True,
+                                key="externos_csv"
+                            )
+                        with col_xlsx:
+                            xlsx_bytes = to_xlsx_bytes_externos_duas_abas(
+                                df_normal=df_final,
+                                sheet_normal="Externos",
+                                sheet_spaced="Externos_Espacado",
+                                blank_rows=3
+                            )
+                            st.download_button(
+                                "Baixar XLSX (Externos)",
+                                data=xlsx_bytes,
+                                file_name="externos.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True,
+                                key="externos_xlsx"
+                            )
+                    else:
+                        st.warning("Nenhuma informação válida encontrada nos PDFs para Externos.")
 
                 elif acao == "gastos":
                     if not ADICIONALES_AVAILABLE:
                         st.error("Gastos Adicionales indisponível: confira dependências e `services/adicionales_service.py`.")
                     else:
                         cambio_df = st.session_state.get("tasa_df")
-                        df_final = process_adicionales_streamlit(uploaded_files=uploaded_files, progress_widget=progress, status_widget=status, cambio_df=cambio_df)
-                        if df_final is not None and not df_final.empty:
-                            st.success("Gastos Adicionales concluído!")
-                            st.dataframe(df_final.head(50), use_container_width=True)
-                            col_csv, col_xlsx = st.columns(2)
-                            with col_csv:
-                                st.download_button("Baixar CSV (Adicionales)", data=df_final.to_csv(index=False).encode("utf-8"), file_name="gastos_adicionales.csv", mime="text/csv", use_container_width=True, key="adicionales_csv")
-                            with col_xlsx:
-                                xlsx_bytes = to_xlsx_bytes(df_final, sheet_name="Adicionales")
-                                st.download_button("Baixar XLSX (Adicionales)", data=xlsx_bytes, file_name="gastos_adicionales.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key="adicionales_xlsx")
-                        else:
-                            st.warning("Nenhuma informação válida encontrada nos PDFs para Gastos Adicionales.")
+                        df_final = process_adicionales_streamlit(
+                            uploaded_files=uploaded_files,
+                            progress_widget=progress,
+                            status_widget=status,
+                            cambio_df=cambio_df
+                        )
+                    if df_final is not None and not df_final.empty:
+                        st.success("Gastos Adicionales concluído!")
+                        st.dataframe(df_final.head(50), use_container_width=True)
+                        col_csv, col_xlsx = st.columns(2)
+                        with col_csv:
+                            st.download_button(
+                                "Baixar CSV (Adicionales)",
+                                data=df_final.to_csv(index=False).encode("utf-8"),
+                                file_name="gastos_adicionales.csv",
+                                mime="text/csv",
+                                use_container_width=True,
+                                key="adicionales_csv"
+                            )
+                        # ✅ ALTERADO: XLSX com DUAS abas
+                        with col_xlsx:
+                            xlsx_bytes = to_xlsx_bytes_externos_duas_abas(
+                                df_normal=df_final,
+                                sheet_normal="Adicionales",
+                                sheet_spaced="Adicionales_Espacado",
+                                blank_rows=3
+                            )
+                            st.download_button(
+                                "Baixar XLSX (Adicionales)",
+                                data=xlsx_bytes,
+                                file_name="gastos_adicionales.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True,
+                                key="adicionales_xlsx"
+                            )
+                    else:
+                        st.warning("Nenhuma informação válida encontrada nos PDFs para Gastos Adicionales.")
 
     # -------------------------
     # 🌐 Tasa SUNAT
@@ -804,10 +893,24 @@ def render():
                 st.dataframe(df.head(30), use_container_width=True)
                 col_csv, col_xlsx = st.columns(2)
                 with col_csv:
-                    st.download_button("Baixar CSV", data=df.to_csv(index=False).encode("utf-8"), file_name="tasa_consolidada.csv", mime="text/csv", use_container_width=True, key="tasa_csv")
+                    st.download_button(
+                        "Baixar CSV",
+                        data=df.to_csv(index=False).encode("utf-8"),
+                        file_name="tasa_consolidada.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        key="tasa_csv"
+                    )
                 with col_xlsx:
                     xlsx_bytes = to_xlsx_bytes(df, sheet_name="Tasa")
-                    st.download_button("Baixar XLSX", data=xlsx_bytes, file_name="tasa_consolidada.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key="tasa_xlsx")
+                    st.download_button(
+                        "Baixar XLSX",
+                        data=xlsx_bytes,
+                        file_name="tasa_consolidada.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key="tasa_xlsx"
+                    )
             else:
                 st.warning("Não foi possível obter dados da Tasa. Verifique credenciais/token/cookie.")
 
@@ -820,7 +923,14 @@ def render():
         uploaded_excel = st.file_uploader("Carregar Arquivo", type=["xlsx", "xls"], key="sharepoint_excel_uploader")
         if uploaded_excel:
             try:
-                df_all = pd.read_excel(uploaded_excel, sheet_name="all", header=0, usecols="A:Z", nrows=20000, engine="openpyxl")
+                df_all = pd.read_excel(
+                    uploaded_excel,
+                    sheet_name="all",
+                    header=0,
+                    usecols="A:Z",
+                    nrows=20000,
+                    engine="openpyxl"
+                )
                 from services.sharepoint_utils import ajustar_sharepoint_df
                 df_all = ajustar_sharepoint_df(df_all)
                 st.session_state["sharepoint_df"] = df_all
@@ -830,7 +940,14 @@ def render():
                 st.subheader("⬇️ Downloads do Arquivo SharePoint")
                 col_csv, col_xlsx = st.columns(2)
                 with col_csv:
-                    st.download_button("Baixar CSV (SharePoint)", data=df_all.to_csv(index=False).encode("utf-8"), file_name="sharepoint_all.csv", mime="text/csv", use_container_width=True, key="sharepoint_csv")
+                    st.download_button(
+                        "Baixar CSV (SharePoint)",
+                        data=df_all.to_csv(index=False).encode("utf-8"),
+                        file_name="sharepoint_all.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        key="sharepoint_csv"
+                    )
                 with col_xlsx:
                     buffer = BytesIO()
                     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -842,7 +959,14 @@ def render():
                         else:
                             _autofit_worksheet(ws)
                     buffer.seek(0)
-                    st.download_button("Baixar XLSX (SharePoint)", data=buffer, file_name="sharepoint_all.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key="sharepoint_xlsx")
+                    st.download_button(
+                        "Baixar XLSX (SharePoint)",
+                        data=buffer,
+                        file_name="sharepoint_all.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key="sharepoint_xlsx"
+                    )
             except ValueError:
                 st.error("❌ A aba 'all' não foi encontrada no arquivo Excel.")
             except Exception as e:
@@ -858,7 +982,6 @@ def render():
     with tab5:
         st.subheader("📝 Transformar .prn")
         st.caption("Selecione um fluxo abaixo e carregue o Excel (primeira aba = Carga Financeira, segunda aba = Carga Contábil).")
-
         if "prn_flow" not in st.session_state:
             st.session_state.prn_flow = None
 
@@ -874,7 +997,6 @@ def render():
                 st.session_state.prn_flow = "gastos"
 
         st.divider()
-
         flow = st.session_state.prn_flow
 
         # -------------------- FLUXO EXTERNOS --------------------
@@ -885,9 +1007,8 @@ def render():
                 type=["xlsx", "xls"],
                 key="prn_externos_upl",
                 accept_multiple_files=False,
-                help="1ª aba -> Externos.prn/.xlsx | 2ª aba -> aexternos.prn/.xlsx"
+                help="1ª aba -> Externos.prn/.xlsx \n 2ª aba -> aexternos.prn/.xlsx"
             )
-
             if uploaded_xl is not None:
                 colg1, colg2 = st.columns(2)
                 with colg1:
@@ -900,7 +1021,6 @@ def render():
                         except Exception as e:
                             st.error("Falha ao gerar Externos.prn")
                             st.exception(e)
-
                     # XLSX (1ª aba)
                     if st.button("Gerar Externos.xlsx", key="gen_externos_xlsx1", use_container_width=True):
                         try:
@@ -910,7 +1030,6 @@ def render():
                         except Exception as e:
                             st.error("Falha ao gerar Externos.xlsx")
                             st.exception(e)
-
                 with colg2:
                     # PRN (2ª aba)
                     if st.button("Gerar aexternos.prn", key="gen_externos_prn2", type="secondary", use_container_width=True):
@@ -921,7 +1040,6 @@ def render():
                         except Exception as e:
                             st.error("Falha ao gerar aexternos.prn")
                             st.exception(e)
-
                     # XLSX (2ª aba)
                     if st.button("Gerar aexternos.xlsx", key="gen_externos_xlsx2", use_container_width=True):
                         try:
@@ -933,7 +1051,6 @@ def render():
                             st.exception(e)
 
         # -------------------- FLUXO DUAS --------------------
-# -------------------- FLUXO DUAS --------------------
         elif flow == "duas":
             st.info("Fluxo **DUAS** selecionado. Carregue o arquivo Excel.")
             uploaded_xl_d = st.file_uploader(
@@ -941,13 +1058,12 @@ def render():
                 type=["xlsx", "xls"],
                 key="prn_duas_upl",
                 accept_multiple_files=False,
-                help="1ª aba -> Duas.prn/.xlsx | 2ª aba -> ADuas.prn/.xlsx"
+                help="1ª aba -> Duas.prn/.xlsx \n 2ª aba -> ADuas.prn/.xlsx"
             )
-        
             if uploaded_xl_d is not None:
                 # Mantém a mesma disposição visual do fluxo Adicionales: 3 colunas
                 c1, c2, c3 = st.columns(3)
-        
+
                 # -------- PRIMEIRA ABA --------
                 with c1:
                     if st.button("Gerar Duas.prn", key="gen_duas_prn1", type="primary", use_container_width=True):
@@ -965,7 +1081,7 @@ def render():
                         except Exception as e:
                             st.error("Falha ao gerar Duas.prn")
                             st.exception(e)
-        
+
                     if st.button("Gerar Duas.xlsx", key="gen_duas_xlsx1", use_container_width=True):
                         try:
                             xlsx1 = gerar_duas_xlsx_primeira_aba(uploaded_xl_d)
@@ -981,7 +1097,7 @@ def render():
                         except Exception as e:
                             st.error("Falha ao gerar Duas.xlsx")
                             st.exception(e)
-        
+
                 # -------- ZIP (PRNs por linha) – fica no centro, como no Adicionales --------
                 with c2:
                     if st.button("Gerar ZIP (PRNs por linha)", key="gen_duas_zip", type="secondary", use_container_width=True):
@@ -1002,7 +1118,7 @@ def render():
                         except Exception as e:
                             st.error("Falha ao gerar ZIP com PRNs individuais (DUAS)")
                             st.exception(e)
-        
+
                 # -------- SEGUNDA ABA --------
                 with c3:
                     if st.button("Gerar ADuas.prn", key="gen_duas_prn2", use_container_width=True):
@@ -1020,7 +1136,7 @@ def render():
                         except Exception as e:
                             st.error("Falha ao gerar ADuas.prn")
                             st.exception(e)
-        
+
                     if st.button("Gerar ADuas.xlsx", key="gen_duas_xlsx2", use_container_width=True):
                         try:
                             xlsx2 = gerar_duas_xlsx_segunda_aba(uploaded_xl_d)
@@ -1045,9 +1161,8 @@ def render():
                 type=["xlsx", "xls"],
                 key="prn_gastos_upl",
                 accept_multiple_files=False,
-                help="1ª aba -> Adicionales.prn/.xlsx | 2ª aba -> AAdicionales.prn/.xlsx"
+                help="1ª aba -> Adicionales.prn/.xlsx \n 2ª aba -> AAdicionales.prn/.xlsx"
             )
-
             if uploaded_xl_g is not None:
                 cga1, cga2, cga3 = st.columns(3)
 
@@ -1061,7 +1176,6 @@ def render():
                             st.error("Falha ao gerar Adicionales.prn")
                             st.exception(e)
 
-                    # XLSX (1ª aba)
                     if st.button("Gerar Adicionales.xlsx", key="gen_adic_xlsx1", use_container_width=True):
                         try:
                             xlsx_adic_1 = gerar_adicionales_xlsx_primeira_aba(uploaded_xl_g)
@@ -1091,7 +1205,6 @@ def render():
                             st.error("Falha ao gerar AAdicionales.prn")
                             st.exception(e)
 
-                    # XLSX (2ª aba)
                     if st.button("Gerar AAdicionales.xlsx", key="gen_adic_xlsx2", use_container_width=True):
                         try:
                             xlsx_adic_2 = gerar_adicionales_xlsx_segunda_aba(uploaded_xl_g)
