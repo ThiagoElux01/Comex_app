@@ -433,9 +433,12 @@ def render():
     _ensure_state()
     st.subheader("Aplicación Archivo Gastos")
 
-    # Botões principais (agora com CUENTA + Limpieza)
+   # Botões principais (agora com CUENTA + Limpieza)
     col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns(5)
-
+    
+    # ✅ garante que a variável exista no escopo, evitando NameError
+    limpieza_pg_clicked = False
+    
     with col_b1:
         if st.button("Estado de Cuenta", use_container_width=True):
             _set_mode("estado")
@@ -451,14 +454,15 @@ def render():
     with col_b4:
         if st.button("Cuenta", use_container_width=True):
             _set_mode("cuenta")
-
+    
     with col_b5:
-        limpieza_pg_clicked = st.button("Limpieza Plantilla Gastos", use_container_width=True)
-
+        # ✅ ao clicar, seta True (em vez de atribuir direto à variável fora)
+        if st.button("Limpieza Plantilla Gastos", use_container_width=True):
+            limpeza_pg_clicked = True
+    
     mode = st.session_state["aag_mode"]
     st.divider()
-
-    # ====== AÇÃO: Limpieza Plantilla Gastos (global, independente da aba) ======
+    
     if limpeza_pg_clicked:
         st.subheader("🧹 Limpieza da Plantilla de Gastos")
         try:
