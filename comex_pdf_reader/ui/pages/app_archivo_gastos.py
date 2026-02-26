@@ -101,12 +101,12 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
             saldo_real, saldo,  # << invertido
             texto])
         
-    cols = [
-        "CTA","CC","PROD","CNT","TDW",
-        "Fecha","Transacción",
-        "Debe","Haber",
-        "Saldo Real","Saldo",  # << invertido
-        "Texto"]
+        cols = [
+            "CTA","CC","PROD","CNT","TDW",
+            "Fecha","Transacción",
+            "Debe","Haber",
+            "Saldo Real","Saldo",  # << invertido
+            "Texto"]
     
     return pd.DataFrame(dados, columns=cols)
 
