@@ -49,96 +49,65 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     # ============================================================
     cta_header = None
     reg_header = re.compile(r"Nº de cta\.\s+(\d{6})")
-    for ln in linhas[:30]:
+    for ln in linhas[:40]:
         m = reg_header.search(ln)
         if m:
             cta_header = m.group(1)
             break
-
     if not cta_header:
-        raise ValueError("CTA não encontrada no cabeçalho do arquivo.")
+        raise ValueError("CTA não encontrada no cabeçalho.")
 
     # ============================================================
     # 2) Helpers
     # ============================================================
-    def is_number(x: str):
-        return bool(re.match(r"^-?[\d,]+\.\d{2}$", x))
-
-    def to_number(x: str):
-        return float(x.replace(",", ""))
-
-    def is_date(x: str):
-        return bool(re.match(r"^\d{2}/\d{2}/\d{2}$", x))
+    def clean_num(v):
+        v = v.strip()
+        if not v:
+            return 0.0
+        v = v.replace(",", "")
+        try:
+            return float(v)
+        except:
+            return 0.0
 
     ignore = re.compile(
-        r"Electrolux|Planificación|Moneda|Scala|^CTA|^CC\s|={3,}|-{3,}|"
-        r"ACTIVO|EXIGIBLES|Saldo Inicial|Saldo final|T O T A L|Criterios|Página|CUENTAS POR"
+        r"Electrolux|Planificación|Moneda|Scala|^-{3,}|^={3,}|"
+        r"Saldo Inicial|Saldo final|T O T A L|ACTIVO|CUENTAS POR|Página|Criterios"
     )
 
     # ============================================================
-    # 3) Processamento
+    # 3) Processamento por colunas fixas
     # ============================================================
     for ln in linhas:
+
         if ignore.search(ln):
             continue
-
-        raw = ln.rstrip()
-        if not raw:
+        if len(ln.strip()) == 0:
             continue
+        if not re.search(r"\d{2}/\d{2}/\d{2}", ln):
+            continue  # não contém data → não é lançamento válido
 
-        parts = raw.split()
-        if len(parts) < 4:
-            continue
+        # Extração por posições fixas do GL0061
+        cc    = ln[0:5].strip()
+        prod  = ln[5:11].strip()
+        cnt   = ln[11:17].strip()
+        tdw   = ln[17:23].strip()
+        fecha = ln[23:33].strip()
+        ntran = ln[33:45].strip()
+        debe  = clean_num(ln[45:66])
+        haber = clean_num(ln[66:87])
+        saldo = clean_num(ln[87:108])
+        texto = ln[108:].strip()
 
-        # tenta localizar a data
-        idx_data = None
-        for i, tok in enumerate(parts):
-            if is_date(tok):
-                idx_data = i
-                break
-
-        if idx_data is None:
-            continue
-
-        # últimos 3 tokens devem ser números
-        if not (is_number(parts[-1]) and is_number(parts[-2]) and is_number(parts[-3])):
-            continue
-
-        saldo = to_number(parts[-1])
-        haber = to_number(parts[-2])
-        debe = to_number(parts[-3])
         saldo_real = round(debe - haber, 2)
 
-        middle = parts[:-3]
-
-        fecha = middle[idx_data]
-        ntran = middle[idx_data+1] if (idx_data + 1) < len(middle) else ""
-        texto_rest = " ".join(middle[idx_data+2:]) if (idx_data + 2) < len(middle) else ""
-
-        meta = middle[:idx_data]
-
-        # CC = primeiro número de 3 dígitos da linha
-        cc = ""
-        prod = ""
-        cnt = ""
-        tdw = ""
-
-        # Caso especial: CC ausente → linha começa com espaços
-        if len(meta) > 0 and re.match(r"^\d{3}$", meta[0]):
-            cc = meta[0]
-            meta = meta[1:]
-
-        # PROD / CNT / TDW = até 3 campos
-        if len(meta) >= 1:
-            prod = meta[0]
-        if len(meta) >= 2:
-            cnt = meta[1]
-        if len(meta) >= 3:
-            tdw = meta[2]
+        # CC inválido? vira vazio
+        if not cc.isdigit():
+            cc = ""
 
         dados.append([
             cta_header, cc, prod, cnt, tdw,
-            fecha, ntran, debe, haber, saldo, saldo_real, texto_rest
+            fecha, ntran, debe, haber, saldo, saldo_real, texto
         ])
 
     cols = [
