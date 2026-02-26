@@ -354,6 +354,7 @@ def render():
                 del st.session_state["aag_estado_df"]
             st.rerun()
 
+        # Se clicou em Executar com arquivo -> processa e salva
         if run_clicked and uploaded is not None:
             pbar = st.progress(0, text="Lendo arquivo .txt...")
             try:
@@ -374,55 +375,57 @@ def render():
                 # Salva o DF base (sem a linha TOTAL) para uso na aba Analise
                 st.session_state["aag_estado_df"] = df_base.copy()
 
-                # ======== LINHA TOTAL ========
-                df = df_base.copy()
-                numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
-                for c in numeric_cols:
-                    df[c] = pd.to_numeric(df[c], errors="coerce")
-                totals = {c: float(np.nansum(df[c].values)) for c in numeric_cols}
-                total_row = {col: "" for col in df.columns}
-                total_row["Descripción"] = "TOTAL"
-                for c in numeric_cols:
-                    total_row[c] = totals[c]
-                df = pd.concat([df, pd.DataFrame([total_row], columns=df.columns)], ignore_index=True)
-
                 pbar.progress(70, text="Preparando visualização...")
                 st.success("Arquivo processado com sucesso.")
-                st.dataframe(
-                    df,
-                    use_container_width=True,
-                    height=550,
-                    column_config={
-                        c: st.column_config.NumberColumn(format="%.2f") for c in numeric_cols if c in df.columns
-                    },
-                )
-
-                pbar.progress(90, text="Gerando arquivos para download...")
-                col_csv, col_xlsx = st.columns(2)
-                with col_csv:
-                    st.download_button(
-                        label="Baixar CSV (Estado de Cuenta)",
-                        data=df.to_csv(index=False).encode("utf-8"),
-                        file_name="estado_de_cuenta.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                    )
-                with col_xlsx:
-                    xlsx_bytes = to_xlsx_bytes_format(
-                        df, sheet_name="EstadoCuenta", numeric_cols=numeric_cols, date_cols=[]
-                    )
-                    st.download_button(
-                        label="Baixar XLSX (Estado de Cuenta)",
-                        data=xlsx_bytes,
-                        file_name="estado_de_cuenta.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True,
-                    )
-
+                # Exibição será feita abaixo a partir do DF salvo
                 pbar.progress(100, text="Concluído.")
             except Exception as e:
                 st.error("Erro ao processar o arquivo .txt.")
                 st.exception(e)
+
+        # --- Sempre que houver DF salvo, exibe (mesmo sem clicar em Executar agora) ---
+        if "aag_estado_df" in st.session_state and isinstance(st.session_state["aag_estado_df"], pd.DataFrame):
+            df_base = st.session_state["aag_estado_df"]
+
+            # Monta linha TOTAL para exibição/exports
+            df = df_base.copy()
+            numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
+            for c in numeric_cols:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+            totals = {c: float(np.nansum(df[c].values)) for c in numeric_cols}
+            total_row = {col: "" for col in df.columns}
+            total_row["Descripción"] = "TOTAL"
+            for c in numeric_cols:
+                total_row[c] = totals[c]
+            df = pd.concat([df, pd.DataFrame([total_row], columns=df.columns)], ignore_index=True)
+
+            st.dataframe(
+                df,
+                use_container_width=True,
+                height=550,
+                column_config={c: st.column_config.NumberColumn(format="%.2f") for c in numeric_cols if c in df.columns},
+            )
+
+            col_csv, col_xlsx = st.columns(2)
+            with col_csv:
+                st.download_button(
+                    label="Baixar CSV (Estado de Cuenta)",
+                    data=df.to_csv(index=False).encode("utf-8"),
+                    file_name="estado_de_cuenta.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+            with col_xlsx:
+                xlsx_bytes = to_xlsx_bytes_format(
+                    df, sheet_name="EstadoCuenta", numeric_cols=numeric_cols, date_cols=[]
+                )
+                st.download_button(
+                    label="Baixar XLSX (Estado de Cuenta)",
+                    data=xlsx_bytes,
+                    file_name="estado_de_cuenta.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
 
     # -------------------------------------------------------------------------
     # Modo: Plantilla de Gastos (.xlsx/.xls)
@@ -516,16 +519,16 @@ def render():
                             return cols_map[key]
                     return None
                 
-                cuenta_col   = _find_col_ci(df_pg, ["Cuenta"])
-                tdate_col    = _find_col_ci(df_pg, ["TransactionDate", "Transaction Date", "TransDate"])
-                tno_col      = _find_col_ci(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
+                cuenta_col    = _find_col_ci(df_pg, ["Cuenta"])
+                tdate_col     = _find_col_ci(df_pg, ["TransactionDate", "Transaction Date", "TransDate"])
+                tno_col       = _find_col_ci(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
                 amount_col_ci = amount_col  # já detectado acima
                 
                 # Converter datas detectadas para dd/mm/aaaa (string) e números para 2 casas
-                tdate_str = df_pg[tdate_col].apply(_fmt_date_ddmmyyyy) if tdate_col else ""
-                tno_str   = df_pg[tno_col].apply(_str_or_empty) if tno_col else ""
-                cuenta_str= df_pg[cuenta_col].apply(_str_or_empty) if cuenta_col else ""
-                amount_str= df_pg[amount_col_ci].apply(_fmt_num_2dec_point) if amount_col_ci else ""
+                tdate_str  = df_pg[tdate_col].apply(_fmt_date_ddmmyyyy) if tdate_col else ""
+                tno_str    = df_pg[tno_col].apply(_str_or_empty) if tno_col else ""
+                cuenta_str = df_pg[cuenta_col].apply(_str_or_empty) if cuenta_col else ""
+                amount_str = df_pg[amount_col_ci].apply(_fmt_num_2dec_point) if amount_col_ci else ""
                 
                 # Concatena com pipe
                 df_pg["Chave"] = (
@@ -541,49 +544,68 @@ def render():
                 pbar.progress(70, text="Preparando visualização...")
                 st.success("Arquivo carregado com sucesso.")
 
-                # Configuração de colunas para visualização
-                col_cfg = {
-                    str(amount_col): st.column_config.NumberColumn(format="%.2f")
-                }
-                for dc in found_date_cols:
-                    col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
-
-                st.dataframe(
-                    df_pg,
-                    use_container_width=True,
-                    height=550,
-                    column_config=col_cfg,
-                )
-
-                pbar.progress(90, text="Gerando arquivos para download...")
-                col_csv, col_xlsx = st.columns(2)
-                with col_csv:
-                    st.download_button(
-                        label="Baixar CSV (Plantilla Gastos)",
-                        data=df_pg.to_csv(index=False).encode("utf-8"),
-                        file_name="plantilla_gastos.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                    )
-                with col_xlsx:
-                    xlsx_bytes = to_xlsx_bytes_format(
-                        df_pg,
-                        sheet_name="PlantillaGastos",
-                        numeric_cols=[amount_col],
-                        date_cols=found_date_cols,
-                    )
-                    st.download_button(
-                        label="Baixar XLSX (Plantilla Gastos)",
-                        data=xlsx_bytes,
-                        file_name="plantilla_gastos.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True,
-                    )
-
                 pbar.progress(100, text="Concluído.")
             except Exception as e:
                 st.error("Erro ao processar o arquivo Excel.")
                 st.exception(e)
+
+        # --- Sempre que houver DF salvo, exibe (mesmo sem clicar em Executar agora) ---
+        if "aag_plantilla_df" in st.session_state and isinstance(st.session_state["aag_plantilla_df"], pd.DataFrame):
+            df_pg = st.session_state["aag_plantilla_df"]
+
+            # Recalcula col_cfg baseado no DF salvo (mantém formatação)
+            # Detecta Amount para a visualização
+            amount_col_view = None
+            for c in df_pg.columns:
+                if str(c).strip().lower() == "amount":
+                    amount_col_view = c
+                    break
+            if amount_col_view is None:
+                candidates = [c for c in df_pg.columns if "amount" in str(c).strip().lower()]
+                if candidates:
+                    amount_col_view = candidates[0]
+
+            # Detecta colunas de data conhecidas para exibição
+            known_date_keys = {"transactiondate","duedate","due_date","invoicedate","invoice_date"}
+            found_date_cols_view = [c for c in df_pg.columns if c.lower().replace(" ", "_") in known_date_keys]
+
+            col_cfg = {}
+            if amount_col_view:
+                col_cfg[str(amount_col_view)] = st.column_config.NumberColumn(format="%.2f")
+            for dc in found_date_cols_view:
+                col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
+
+            st.dataframe(
+                df_pg,
+                use_container_width=True,
+                height=550,
+                column_config=col_cfg,
+            )
+
+            col_csv, col_xlsx = st.columns(2)
+            with col_csv:
+                st.download_button(
+                    label="Baixar CSV (Plantilla Gastos)",
+                    data=df_pg.to_csv(index=False).encode("utf-8"),
+                    file_name="plantilla_gastos.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+            with col_xlsx:
+                xlsx_bytes = to_xlsx_bytes_format(
+                    df_pg,
+                    sheet_name="PlantillaGastos",
+                    numeric_cols=[amount_col_view] if amount_col_view else [],
+                    # Tenta aplicar formato de data nas colunas reconhecidas como datetime
+                    date_cols=[c for c in df_pg.columns if pd.api.types.is_datetime64_any_dtype(df_pg[c]) or c in found_date_cols_view],
+                )
+                st.download_button(
+                    label="Baixar XLSX (Plantilla Gastos)",
+                    data=xlsx_bytes,
+                    file_name="plantilla_gastos.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
 
     # -------------------------------------------------------------------------
     # Modo: Analise — compara Estado de Cuenta (CTA/Período) x Plantilla (Cuenta/Amount)
@@ -815,6 +837,10 @@ def render():
             
             # Salva com 'Chave'
             st.session_state["aag_cuenta_df"] = df.copy()
+
+        # --- Sempre que houver DF salvo, exibe (mesmo sem clicar em Processar agora) ---
+        if "aag_cuenta_df" in st.session_state and isinstance(st.session_state["aag_cuenta_df"], pd.DataFrame):
+            df = st.session_state["aag_cuenta_df"]
 
             # Colunas de data para exibição (Fecha e/ou Fechado)
             date_cols = [c for c in ["Fecha", "Fechado"] if c in df.columns]
