@@ -45,50 +45,78 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     dados = []
     current_cta = None
 
-    # Regex principal (já funcionava)
-    reg = re.compile(
-        r"^\s*(\d{3})\s+(\d{2}\/\d{2}\/\d{2})\s+(\S+)\s+"      # CC, Fecha, Nºtran
-        r"([\d,]+\.\d{2}|0\.00)\s+"                           # Debe
-        r"([\d,]+\.\d{2}|0\.00)\s+"                           # Haber
-        r"([\d,]+\.\d{2})\s+"                                 # Saldo
-        r"(.*)$"                                              # Texto
-    )
+    # Detecta CTA: 6 dígitos + espaço
+    reg_cta = re.compile(r"^\s*(\d{6})\s+")
 
-    # Regex para identificar CTA corretamente
-    reg_cta = re.compile(r"^\s*(\d{6})\b")
+    # Detecta início de linha de movimento:
+    # começa com CC (3 dígitos)
+    reg_mov = re.compile(r"^\s*(\d{3})\s+(.*)$")
 
     for ln in linhas:
-        raw = ln.strip()
+        raw = ln.rstrip()
 
-        # Detecta troca de conta
+        # --- CTA ---
         mcta = reg_cta.match(raw)
         if mcta:
             current_cta = mcta.group(1)
             continue
 
-        # Detecta linha de lançamento
-        m = reg.match(raw)
-        if m:
-            cc = m.group(1)
-            fecha = m.group(2)
-            ntran = m.group(3)
-            debe = float(m.group(4).replace(",", ""))
-            haber = float(m.group(5).replace(",", ""))
-            saldo = float(m.group(6).replace(",", ""))
-            texto_rest = m.group(7).strip()
+        # --- Movimento ---
+        mm = reg_mov.match(raw)
+        if not mm:
+            continue
 
-            # PROD/CNT/TDW muitas vezes inexistem → deixar vazio
-            prod = ""
-            cnt = ""
-            tdw = ""
+        cc = mm.group(1)
+        resto = mm.group(2).strip()
 
-            # Saldo Real = Debe - Haber
-            saldo_real = round(debe - haber, 2)
+        # Divide tudo da direita para esquerda para capturar corretamente Debe/Haber/Saldo
+        partes = resto.split()
 
-            dados.append([
-                current_cta, cc, prod, cnt, tdw,
-                fecha, ntran, debe, haber, saldo, saldo_real, texto_rest
-            ])
+        # Pelo layout, as 3 últimas colunas são SEMPRE:
+        # ... Debe Haber Saldo Texto...
+        if len(partes) < 4:
+            continue
+
+        # Extrai de trás para frente
+        try:
+            saldo = float(partes[-1].replace(",", ""))
+            haber = float(partes[-2].replace(",", ""))
+            debe = float(partes[-3].replace(",", ""))
+        except:
+            continue
+
+        # Remove Debe/Haber/Saldo da lista
+        partes = partes[:-3]
+
+        # A data é SEMPRE o primeiro token que bate com dd/mm/yy
+        idx_data = None
+        for i, tok in enumerate(partes):
+            if re.match(r"\d{2}/\d{2}/\d{2}", tok):
+                idx_data = i
+                break
+
+        if idx_data is None:
+            continue
+
+        # PROD / CNT / TDW = tudo entre CC e a data, se existirem
+        meta = partes[:idx_data]
+        fecha = partes[idx_data]
+        ntran = partes[idx_data + 1] if idx_data + 1 < len(partes) else ""
+
+        # Texto: tudo após Nºtran
+        texto_rest = " ".join(partes[idx_data + 2 :])
+
+        # Ajusta PROD / CNT / TDW
+        prod = meta[0] if len(meta) >= 1 else ""
+        cnt = meta[1] if len(meta) >= 2 else ""
+        tdw = meta[2] if len(meta) >= 3 else ""
+
+        saldo_real = round(debe - haber, 2)
+
+        dados.append([
+            current_cta, cc, prod, cnt, tdw,
+            fecha, ntran, debe, haber, saldo, saldo_real, texto_rest
+        ])
 
     cols = [
         "CTA", "CC", "PROD", "CNT", "TDW",
