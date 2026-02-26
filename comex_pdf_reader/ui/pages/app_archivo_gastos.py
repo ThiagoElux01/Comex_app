@@ -246,6 +246,9 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     """
     Parser para arquivos GL0061 (colunas fixas em linha), com:
     CTA | CC | PROD | CNT | TDW | Fecha | Transacción | Debe | Haber | Saldo Real | Saldo | Texto
+
+    Ajustes:
+    - Debe/Haber aceitam número com negativo no final (ex.: "9,200.29-") e preservam o sinal.
     """
     linhas = texto.splitlines()
     dados = []
@@ -261,10 +264,20 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     if not cta_header:
         raise ValueError("CTA não encontrada no cabeçalho do arquivo GL0061.")
 
+    # Conversor numérico que entende "9,200.29-" como negativo
     def clean_num(v: str | None) -> float:
         if not v:
             return 0.0
-        return float(v.replace(",", ""))
+        s = str(v).strip()
+        neg = s.endswith("-")
+        if neg:
+            s = s[:-1]
+        s = s.replace(",", "")
+        try:
+            val = float(s)
+        except Exception:
+            val = 0.0
+        return -val if neg else val
 
     ignore = re.compile(
         r"Electrolux|Planificación|Moneda|Scala|^-{3,}|^={3,}|"
@@ -296,7 +309,8 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
         ntran  = ln[40:50].strip()
 
         # Últimos 3 números = Debe, Haber, Saldo impresso
-        nums = re.findall(r"[-\d,]+\.\d{2}", ln)
+        # Agora aceita negativo com traço no FINAL (ex.: 9,200.29-)
+        nums = re.findall(r"[-\d,]+\.\d{2}-?", ln)
         if len(nums) < 3:
             continue
 
@@ -304,7 +318,7 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
         haber = clean_num(nums[-2])
         saldo_impresso = clean_num(nums[-1])
 
-        # Saldo Real = Debe - Haber
+        # Saldo Real = Debe - Haber (mantendo sinais reais)
         saldo_real = round(debe - haber, 2)
 
         # Texto após o saldo impresso
