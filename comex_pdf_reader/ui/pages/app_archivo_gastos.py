@@ -42,7 +42,7 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     linhas = texto.splitlines()
     dados = []
 
-    # 1) Pegar CTA do cabeçalho
+    # Encontrar CTA no cabeçalho
     cta_header = None
     reg_header = re.compile(r"Nº de cta\.\s+(\d{6})")
     for ln in linhas[:50]:
@@ -51,25 +51,17 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
             cta_header = m.group(1)
             break
     if not cta_header:
-        raise ValueError("CTA não encontrada no cabeçalho.")
+        raise ValueError("CTA não encontrada.")
 
-    # Helpers numéricos
     def clean_num(v):
-        v = v.strip()
-        if not v:
-            return 0.0
-        v = v.replace(",", "")
-        try:
-            return float(v)
-        except:
-            return 0.0
+        if not v: return 0.0
+        return float(v.replace(",", ""))
 
     ignore = re.compile(
         r"Electrolux|Planificación|Moneda|Scala|^-{3,}|^={3,}|"
         r"Saldo Inicial|Saldo final|T O T A L|ACTIVO|Página|Criterios|CUENTAS POR"
     )
 
-    # 2) Varredura linha a linha
     for ln in linhas:
         if ignore.search(ln):
             continue
@@ -78,25 +70,29 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
         if not re.search(r"\d{2}/\d{2}/\d{2}", ln):
             continue
 
-        # Offsets exatos enviados por você
+        # Campos fixos no início
         cc     = ln[0:5].strip()
         prod   = ln[5:14].strip()
         cnt    = ln[14:23].strip()
         tdw    = ln[23:31].strip()
         fecha  = ln[31:40].strip()
         ntran  = ln[40:50].strip()
-        debe   = clean_num(ln[50:71])
-        haber  = clean_num(ln[71:111])
-        saldo  = clean_num(ln[111:])
 
-        texto = ""
-        if len(ln) > 120:
-            texto = ln[120:].strip()
+        # Pegar últimos 3 números da linha = Debe, Haber, Saldo
+        nums = re.findall(r"[-\d,]+\.\d{2}", ln)
+        if len(nums) < 3:
+            continue
+
+        debe  = clean_num(nums[-3])
+        haber = clean_num(nums[-2])
+        saldo = clean_num(nums[-1])
+        saldo_real = round(debe - haber, 2)
+
+        # Texto é tudo depois do saldo
+        texto = ln.split(nums[-1])[-1].strip()
 
         if not cc.isdigit():
             cc = ""
-
-        saldo_real = round(debe - haber, 2)
 
         dados.append([
             cta_header, cc, prod, cnt, tdw,
@@ -104,10 +100,10 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
         ])
 
     cols = [
-        "CTA", "CC", "PROD", "CNT", "TDW",
-        "Fecha", "Transacción",
-        "Debe", "Haber", "Saldo",
-        "Saldo Real", "Texto"
+        "CTA","CC","PROD","CNT","TDW",
+        "Fecha","Transacción",
+        "Debe","Haber","Saldo",
+        "Saldo Real","Texto"
     ]
 
     return pd.DataFrame(dados, columns=cols)
