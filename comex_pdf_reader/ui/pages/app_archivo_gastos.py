@@ -310,19 +310,27 @@ def render():
     st.subheader("Aplicación Archivo Gastos")
 
     # Botões principais (agora com CUENTA)
-    col_b1, col_b2, col_b3, col_b4 = st.columns(4)
+    col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns(5)
+
     with col_b1:
         if st.button("Estado de Cuenta", use_container_width=True):
             _set_mode("estado")
+    
     with col_b2:
         if st.button("Plantilla Gastos", use_container_width=True):
             _set_mode("plantilla")
+    
     with col_b3:
         if st.button("Analise", use_container_width=True):
             _set_mode("asientos")
+    
     with col_b4:
         if st.button("Cuenta", use_container_width=True):
             _set_mode("cuenta")
+    
+    # 🔥 NOVO BOTÃO
+    with col_b5:
+        limpieza_pg_clicked = st.button("🧹 Limpieza Plantilla Gastos", use_container_width=True)
 
     mode = st.session_state["aag_mode"]
     st.divider()
