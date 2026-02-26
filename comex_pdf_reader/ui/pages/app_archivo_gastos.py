@@ -327,10 +327,9 @@ def render():
     with col_b4:
         if st.button("Cuenta", use_container_width=True):
             _set_mode("cuenta")
-    
-    # 🔥 NOVO BOTÃO INDEPENDENTE
+
     with col_b5:
-        limpieza_pg_clicked = st.button("🧹 Limpieza Plantilla Gastos", use_container_width=True)
+        limpieza_pg_clicked = st.button("Limpieza Plantilla Gastos", use_container_width=True)
 
     mode = st.session_state["aag_mode"]
     st.divider()
