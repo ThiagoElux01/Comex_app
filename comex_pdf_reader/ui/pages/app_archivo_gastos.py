@@ -4,6 +4,7 @@ import numpy as np
 import streamlit as st
 import pandas as pd
 from io import BytesIO
+from typing import Optional, List, Tuple
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Font
 
@@ -65,7 +66,7 @@ def _str_or_empty(x) -> str:
 # -----------------------------------------------------------------------------
 _NUM = r"(\-?\d[\d,]*\.\d{2}\-?)"  # número com milhares e 2 decimais; pode terminar com '-' (negativo)
 
-def _clean_num(s: str) -> float | None:
+def _clean_num(s: str) -> Optional[float]:
     """Converte strings como '12,345.67-' em float (negativo)."""
     if s is None:
         return None
@@ -154,7 +155,7 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     if not cta_header:
         raise ValueError("CTA não encontrada no cabeçalho do arquivo GL0061.")
 
-    def clean_num(v: str | None) -> float:
+    def clean_num(v: Optional[str]) -> float:
         if not v:
             return 0.0
         return float(v.replace(",", ""))
@@ -216,7 +217,7 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
 
     df = pd.DataFrame(dados, columns=cols)
 
-    # Ajusta datas
+    # Ajuste de data
     for date_col in ["Fecha", "Fechado"]:
         if date_col in df.columns:
             df[date_col] = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True).dt.date
@@ -229,8 +230,8 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
 def to_xlsx_bytes_format(
     df: pd.DataFrame,
     sheet_name: str,
-    numeric_cols: list[str] | None = None,
-    date_cols: list[str] | None = None
+    numeric_cols: Optional[List[str]] = None,
+    date_cols: Optional[List[str]] = None
 ) -> bytes:
     """
     Exporta para XLSX aplicando:
@@ -242,6 +243,7 @@ def to_xlsx_bytes_format(
 
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        # Para manter tipo data no Excel, converte objetos date para datetime64[ns] (sem horário)
         df_to_save = df.copy()
         for dc in date_cols:
             if dc in df_to_save.columns:
@@ -250,6 +252,7 @@ def to_xlsx_bytes_format(
         df_to_save.to_excel(writer, index=False, sheet_name=sheet_name)
         ws = writer.book[sheet_name]
 
+        # Estilos de cabeçalho
         BLUE = "FF0077B6"
         WHITE = "FFFFFFFF"
         fill_blue = PatternFill(fill_type="solid", start_color=BLUE, end_color=BLUE)
@@ -258,6 +261,7 @@ def to_xlsx_bytes_format(
             cell.fill = fill_blue
             cell.font = font_white_bold
 
+        # Formatação numérica
         for col_name in numeric_cols:
             if col_name not in df_to_save.columns:
                 continue
@@ -267,6 +271,7 @@ def to_xlsx_bytes_format(
                 if isinstance(cell.value, (int, float)) and cell.value is not None:
                     cell.number_format = '#,##0.00'
 
+        # Formatação de data
         for col_name in date_cols:
             if col_name not in df_to_save.columns:
                 continue
@@ -276,6 +281,7 @@ def to_xlsx_bytes_format(
                 if cell.value:
                     cell.number_format = 'dd/mm/yyyy'
 
+        # Ajuste de largura
         for col_idx in range(1, ws.max_column + 1):
             max_len = 10
             for row in range(1, ws.max_row + 1):
@@ -293,10 +299,10 @@ def to_xlsx_bytes_format(
     return buffer.getvalue()
 
 # -----------------------------------------------------------------------------
-# ==== NOVOS HELPERS p/ atualização da Plantilla com base em Cuenta ====
+# ==== HELPERS para atualização da Plantilla com base em Cuenta ====
 # -----------------------------------------------------------------------------
-def _find_col_ci(df: pd.DataFrame, targets: list[str]):
-    """Busca coluna ignorando acentos/caixa/caracteres especiais."""
+def _find_col_ci(df: pd.DataFrame, targets: List[str]) -> Optional[str]:
+    """Busca uma coluna no DF ignorando maiúsculas/minúsculas e caracteres especiais."""
     if df is None or df.empty:
         return None
     cols_map = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in df.columns}
@@ -310,7 +316,7 @@ def build_plantilla_atualizada_com_cuenta(
     df_pg: pd.DataFrame,
     df_cu: pd.DataFrame,
     tol: float = 0.01
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Retorna (df_pg_atualizada, df_resumo).
     - Ajusta somente as chaves da CTA carregada (chaves que começam com 'CTA|').
@@ -321,7 +327,6 @@ def build_plantilla_atualizada_com_cuenta(
         raise ValueError("Plantilla de Gastos não carregada.")
     if df_cu is None or df_cu.empty:
         raise ValueError("Cuenta (GL0061) não carregada.")
-
     if "Chave" not in df_pg.columns or "Chave" not in df_cu.columns:
         raise ValueError("Ambos os dataframes precisam ter a coluna 'Chave'.")
 
@@ -330,7 +335,6 @@ def build_plantilla_atualizada_com_cuenta(
     cuenta_col = _find_col_ci(df_pg, ["Cuenta"])
     tdate_col  = _find_col_ci(df_pg, ["TransactionDate", "Transaction Date", "TransDate"])
     tno_col    = _find_col_ci(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
-
     if amount_col is None:
         raise ValueError("Coluna 'Amount' não encontrada na Plantilla.")
 
@@ -348,19 +352,12 @@ def build_plantilla_atualizada_com_cuenta(
 
     # Somas e contagens por Chave (Plantilla x Cuenta)
     df_pg_subset[amount_col] = pd.to_numeric(df_pg_subset[amount_col], errors="coerce").fillna(0.0)
-    g_pg = df_pg_subset.groupby("Chave", as_index=False).agg(
-        soma_pg=(amount_col, "sum"),
-        n_pg=("Chave", "size")
-    )
+    g_pg = df_pg_subset.groupby("Chave", as_index=False).agg(soma_pg=(amount_col, "sum"), n_pg=("Chave", "size"))
 
     if "Saldo Real" not in df_cu_subset.columns:
         raise ValueError("No GL0061 processado não há a coluna 'Saldo Real'.")
-
     df_cu_subset["Saldo Real"] = pd.to_numeric(df_cu_subset["Saldo Real"], errors="coerce").fillna(0.0)
-    g_cu = df_cu_subset.groupby("Chave", as_index=False).agg(
-        soma_cu=("Saldo Real", "sum"),
-        n_cu=("Chave", "size")
-    )
+    g_cu = df_cu_subset.groupby("Chave", as_index=False).agg(soma_cu=("Saldo Real", "sum"), n_cu=("Chave", "size"))
 
     resumo = pd.merge(g_cu, g_pg, on="Chave", how="outer")
     resumo["soma_cu"] = pd.to_numeric(resumo["soma_cu"], errors="coerce").fillna(0.0)
@@ -380,7 +377,6 @@ def build_plantilla_atualizada_com_cuenta(
 
     # Reconstrói chaves com diferença usando as linhas do GL
     chaves_ajustar = resumo.loc[resumo["ajustar"], "Chave"].astype(str).tolist()
-
     molde_por_chave = {}
     if not df_pg_subset.empty:
         molde_por_chave = df_pg_subset.groupby("Chave").head(1).set_index("Chave")
@@ -498,8 +494,10 @@ def render():
                     pbar.progress(0, text="Aguardando...")
                     return
 
+                # Salva o DF base (sem a linha TOTAL) para uso na aba Analise
                 st.session_state["aag_estado_df"] = df_base.copy()
 
+                # ======== LINHA TOTAL ========
                 df = df_base.copy()
                 numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
                 for c in numeric_cols:
@@ -621,7 +619,7 @@ def render():
                 df_pg[amount_col] = pd.to_numeric(df_pg[amount_col], errors="coerce")
 
                 # Cria 'Chave'
-                def _find_col_ci_local(df: pd.DataFrame, targets: list[str]):
+                def _find_col_ci_local(df: pd.DataFrame, targets: List[str]) -> Optional[str]:
                     cols_map = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in df.columns}
                     for t in targets:
                         key = re.sub(r"[^a-z0-9]", "", t.lower())
@@ -830,7 +828,7 @@ def render():
             st.exception(e)
 
     # -------------------------------------------------------------------------
-    # Modo: Cuenta (GL0061) — corrigido para persistir UI e botão sempre visível
+    # Modo: Cuenta (GL0061) — persistência de UI e botão sempre visível
     # -------------------------------------------------------------------------
     elif mode == "cuenta":
         st.subheader("📘 Importar Archivo de Cuenta (GL0061)")
@@ -880,11 +878,9 @@ def render():
             st.session_state["aag_cuenta_df"] = df_new.copy()
             st.success("Cuenta carregada e processada com sucesso.")
 
-        # A partir daqui, renderiza SEMPRE que houver DF na sessão, mesmo sem upload
+        # Renderiza sempre que houver DF da cuenta na sessão
         df_cu = st.session_state.get("aag_cuenta_df")
-
         if df_cu is not None and not df_cu.empty:
-            # Configura visualização
             date_cols = [c for c in ["Fecha", "Fechado"] if c in df_cu.columns]
             col_cfg = {
                 "Debe": st.column_config.NumberColumn(format="%.2f"),
@@ -907,11 +903,8 @@ def render():
                     use_container_width=True
                 )
             with col2:
-                xlsx_bytes = to_xlsx_bytes_format(
-                    df_cu, "Cuenta",
-                    numeric_cols=["Debe","Haber","Saldo Real","Saldo"] if all(c in df_cu.columns for c in ["Debe","Haber","Saldo Real","Saldo"]) else ["Saldo Real","Saldo"],
-                    date_cols=date_cols
-                )
+                numeric_export = [c for c in ["Debe","Haber","Saldo Real","Saldo"] if c in df_cu.columns]
+                xlsx_bytes = to_xlsx_bytes_format(df_cu, "Cuenta", numeric_cols=numeric_export, date_cols=date_cols)
                 st.download_button(
                     "Baixar XLSX (Cuenta)",
                     xlsx_bytes,
