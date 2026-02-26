@@ -309,7 +309,7 @@ def render():
     _ensure_state()
     st.subheader("Aplicación Archivo Gastos")
 
-    # Botões principais (agora com CUENTA)
+    # Botões principais (agora com CUENTA + Limpieza)
     col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns(5)
 
     with col_b1:
@@ -328,7 +328,7 @@ def render():
         if st.button("Cuenta", use_container_width=True):
             _set_mode("cuenta")
     
-    # 🔥 NOVO BOTÃO
+    # 🔥 NOVO BOTÃO INDEPENDENTE
     with col_b5:
         limpieza_pg_clicked = st.button("🧹 Limpieza Plantilla Gastos", use_container_width=True)
 
