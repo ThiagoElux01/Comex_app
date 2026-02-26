@@ -45,41 +45,55 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     dados = []
     current_cta = None
 
+    # Regex principal (já funcionava)
     reg = re.compile(
-        r"^\s*(\d{3})\s+(\d{2}\/\d{2}\/\d{2})\s+(\S+)\s+"  # CC, Data, Documento
-        r"([\d,]+\.\d{2}|0\.00)\s+([\d,]+\.\d{2}|0\.00)\s+([\d,]+\.\d{2})\s+(.*)$"
+        r"^\s*(\d{3})\s+(\d{2}\/\d{2}\/\d{2})\s+(\S+)\s+"      # CC, Fecha, Nºtran
+        r"([\d,]+\.\d{2}|0\.00)\s+"                           # Debe
+        r"([\d,]+\.\d{2}|0\.00)\s+"                           # Haber
+        r"([\d,]+\.\d{2})\s+"                                 # Saldo
+        r"(.*)$"                                              # Texto
     )
 
+    # Regex para identificar CTA corretamente
+    reg_cta = re.compile(r"^\s*(\d{6})\b")
+
     for ln in linhas:
-        ln_strip = ln.strip()
-    
-        # CTA = linha que começa com 6 dígitos
-        if re.match(r"^\d{6}\b", ln_strip):
-            current_cta = ln_strip.split()[0]
-        
-        m = reg.search(ln_strip)
+        raw = ln.strip()
+
+        # Detecta troca de conta
+        mcta = reg_cta.match(raw)
+        if mcta:
+            current_cta = mcta.group(1)
+            continue
+
+        # Detecta linha de lançamento
+        m = reg.match(raw)
         if m:
             cc = m.group(1)
             fecha = m.group(2)
-            trans = m.group(3)
+            ntran = m.group(3)
             debe = float(m.group(4).replace(",", ""))
             haber = float(m.group(5).replace(",", ""))
             saldo = float(m.group(6).replace(",", ""))
             texto_rest = m.group(7).strip()
 
-            parts = ln_strip.split()
-            prod = cnt = tdw = ""
-            if len(parts) >= 5:
-                prod, cnt, tdw = parts[1], parts[2], parts[3]
+            # PROD/CNT/TDW muitas vezes inexistem → deixar vazio
+            prod = ""
+            cnt = ""
+            tdw = ""
+
+            # Saldo Real = Debe - Haber
+            saldo_real = round(debe - haber, 2)
 
             dados.append([
                 current_cta, cc, prod, cnt, tdw,
-                fecha, trans, debe, haber, saldo, texto_rest
+                fecha, ntran, debe, haber, saldo, saldo_real, texto_rest
             ])
 
     cols = [
         "CTA", "CC", "PROD", "CNT", "TDW",
-        "Fecha", "Transacción", "Debe", "Haber", "Saldo", "Texto"
+        "Fecha", "Transacción", "Debe", "Haber", "Saldo",
+        "Saldo Real", "Texto"
     ]
 
     return pd.DataFrame(dados, columns=cols)
