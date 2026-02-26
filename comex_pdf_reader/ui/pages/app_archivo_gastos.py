@@ -71,12 +71,14 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
             continue
 
         # Campos fixos no início
-        cc     = ln[0:5].strip()      # '101'
-        prod   = ln[5:15].strip()     # agora largura correta
-        cnt    = ln[15:25].strip()    # agora CNT não invade PROD
-        tdw    = ln[25:33].strip()
-        fecha  = ln[33:43].strip()
-        ntran  = ln[43:52].strip()
+        cc     = ln[0:5].strip()
+        prod   = ln[5:14].strip()
+        cnt    = ln[14:23].strip()
+        tdw    = ln[23:31].strip()
+        fecha  = ln[31:40].strip()
+        ntran  = ln[40:50].strip()
+
+
         # Pegar últimos 3 números da linha = Debe, Haber, Saldo
         nums = re.findall(r"[-\d,]+\.\d{2}", ln)
         if len(nums) < 3:
