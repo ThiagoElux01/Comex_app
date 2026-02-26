@@ -36,19 +36,94 @@ def _ensure_state():
 
 def _set_mode(mode: str):
     st.session_state["aag_mode"] = mode
+def parse_cuenta_gl(texto: str) -> pd.DataFrame:
+    linhas = texto.splitlines()
+    dados = []
 
-# -----------------------------------------------------------------------------
-# Parser Conta GL0061 (novo)
-# -----------------------------------------------------------------------------
-cc     = ln[0:5]
-prod   = ln[5:14]
-cnt    = ln[14:23]
-tdw    = ln[23:32]
-fecha  = ln[32:41]
-ntran  = ln[41:50]
-debe   = ln[50:71]
-haber  = ln[71:111]
-saldo  = ln[111:resto]
+    # ============================================================
+    # 1) Captura CTA no cabeçalho (ex: "Nº de cta. 121201 -- 121201")
+    # ============================================================
+    cta_header = None
+    reg_header = re.compile(r"Nº de cta\.\s+(\d{6})")
+    for ln in linhas[:50]:
+        m = reg_header.search(ln)
+        if m:
+            cta_header = m.group(1)
+            break
+
+    if not cta_header:
+        raise ValueError("CTA não encontrada no cabeçalho.")
+
+    # ============================================================
+    # Helpers
+    # ============================================================
+    def clean_num(v):
+        v = v.strip()
+        if not v:
+            return 0.0
+        v = v.replace(",", "")
+        try:
+            return float(v)
+        except:
+            return 0.0
+
+    ignore = re.compile(
+        r"Electrolux|Planificación|Moneda|Scala|^-{3,}|^={3,}|"
+        r"Saldo Inicial|Saldo final|T O T A L|ACTIVO|Página|Criterios|CUENTAS POR"
+    )
+
+    # ============================================================
+    # 3) Processamento por COLUNAS FIXAS (layout GL0061)
+    # ============================================================
+    for ln in linhas:
+
+        if ignore.search(ln):
+            continue
+
+        if len(ln.strip()) == 0:
+            continue
+
+        # Precisa ter uma data dd/mm/yy
+        if not re.search(r"\d{2}/\d{2}/\d{2}", ln):
+            continue
+
+        # ======================================================
+        # 📌 COLUNAS FIXAS – DEFINIDAS POR VOCÊ
+        # ======================================================
+        cc     = ln[0:5].strip()
+        prod   = ln[5:14].strip()
+        cnt    = ln[14:23].strip()
+        tdw    = ln[23:31].strip()
+        fecha  = ln[31:40].strip()
+        ntran  = ln[40:50].strip()
+        debe   = clean_num(ln[50:71])
+        haber  = clean_num(ln[71:111])
+        saldo  = clean_num(ln[111:])   # saldo até o final da linha
+
+        # Texto adicional (se existir) — apenas se GL0061 vier com descrição extra
+        texto = ""
+        if len(ln) > 120:
+            texto = ln[120:].strip()
+
+        saldo_real = round(debe - haber, 2)
+
+        # Se CC não for número → deixar vazio
+        if not cc.isdigit():
+            cc = ""
+
+        dados.append([
+            cta_header, cc, prod, cnt, tdw,
+            fecha, ntran, debe, haber, saldo, saldo_real, texto
+        ])
+
+    cols = [
+        "CTA", "CC", "PROD", "CNT", "TDW",
+        "Fecha", "Transacción",
+        "Debe", "Haber", "Saldo",
+        "Saldo Real", "Texto"
+    ]
+
+    return pd.DataFrame(dados, columns=cols)
 # -----------------------------------------------------------------------------
 # Export XLSX
 # -----------------------------------------------------------------------------
