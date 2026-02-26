@@ -149,67 +149,6 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     ]
 
     return pd.DataFrame(dados, columns=cols)
-
-# -----------------------------------------------------------------------------
-# Parsers - ESTADO DE CUENTA
-# -----------------------------------------------------------------------------
-_NUM = r"(\-?\d[\d,]*\.\d{2}\-?)"
-
-def _clean_num(s: str) -> float | None:
-    if s is None:
-        return None
-    s = str(s).strip()
-    if s == "":
-        return None
-    neg = s.endswith("-")
-    s = s[:-1] if neg else s
-    s = s.replace(",", "")
-    try:
-        v = float(s)
-        return -v if neg else v
-    except:
-        return None
-
-def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
-    linhas = texto.splitlines()
-    start_idx = 0
-    for i, ln in enumerate(linhas):
-        if "CTA" in ln and "Descripci" in ln:
-            start_idx = i + 1
-            break
-
-    dados = []
-    tail_re = re.compile(rf"\s*{_NUM}\s+{_NUM}\s+{_NUM}\s+{_NUM}\s*$")
-
-    for ln in linhas[start_idx:]:
-        raw = ln.rstrip()
-        if not raw:
-            continue
-        if set(raw.strip()) in [{"="}, {"-"}] or "Scala" in raw or "Electrolux" in raw:
-            continue
-
-        m = tail_re.search(raw)
-        if not m:
-            continue
-
-        left = raw[: m.start()].rstrip()
-        if not left:
-            continue
-
-        parts = left.split()
-        cta = parts[0] if parts else ""
-        descr = left[len(cta):].strip() if parts else left.strip()
-
-        sal_ob, saldo_ob, periodo, saldo_cb = (_clean_num(x) for x in m.groups())
-        dados.append([cta, descr, sal_ob, saldo_ob, periodo, saldo_cb])
-
-    cols = ["CTA", "Descripción", "Sal OB", "Saldo OB", "Período", "Saldo CB"]
-    df = pd.DataFrame(dados, columns=cols)
-
-    for c in ["Sal OB", "Saldo OB", "Período", "Saldo CB"]:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-    return df
-
 # -----------------------------------------------------------------------------
 # Export XLSX
 # -----------------------------------------------------------------------------
