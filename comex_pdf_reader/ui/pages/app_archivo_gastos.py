@@ -45,20 +45,21 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     dados = []
 
     # ============================================================
-    # 1) Captura CTA a partir do cabeçalho
+    # 1) Captura CTA no cabeçalho
     # ============================================================
     cta_header = None
     reg_header = re.compile(r"Nº de cta\.\s+(\d{6})")
-    for ln in linhas[:40]:
+    for ln in linhas[:50]:
         m = reg_header.search(ln)
         if m:
             cta_header = m.group(1)
             break
+
     if not cta_header:
-        raise ValueError("CTA não encontrada no cabeçalho.")
+        raise ValueError("CTA não encontrada no cabeçalho do arquivo.")
 
     # ============================================================
-    # 2) Helpers
+    # Funções auxiliares
     # ============================================================
     def clean_num(v):
         v = v.strip()
@@ -72,36 +73,46 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
 
     ignore = re.compile(
         r"Electrolux|Planificación|Moneda|Scala|^-{3,}|^={3,}|"
-        r"Saldo Inicial|Saldo final|T O T A L|ACTIVO|CUENTAS POR|Página|Criterios"
+        r"Saldo Inicial|Saldo final|T O T A L|ACTIVO|Página|Criterios|CUENTAS POR"
     )
 
     # ============================================================
-    # 3) Processamento por colunas fixas
+    # 3) Parse por colunas FIXAS (lançamentos)
     # ============================================================
     for ln in linhas:
 
+        # Ignorar cabeçalhos e seções
         if ignore.search(ln):
             continue
+
         if len(ln.strip()) == 0:
             continue
-        if not re.search(r"\d{2}/\d{2}/\d{2}", ln):
-            continue  # não contém data → não é lançamento válido
 
-        # Extração por posições fixas do GL0061
-        cc    = ln[0:5].strip()
-        prod  = ln[5:11].strip()
-        cnt   = ln[11:17].strip()
-        tdw   = ln[17:23].strip()
-        fecha = ln[23:33].strip()
-        ntran = ln[33:45].strip()
-        debe  = clean_num(ln[45:66])
-        haber = clean_num(ln[66:87])
-        saldo = clean_num(ln[87:108])
-        texto = ln[108:].strip()
+        # Tem que ter data no formato correto
+        if not re.search(r"\d{2}/\d{2}/\d{2}", ln):
+            continue
+
+        # -------------------------------
+        # MAPA DEFINITIVO DAS COLUNAS
+        # -------------------------------
+        cc     = ln[0:5].strip()
+        prod   = ln[5:14].strip()
+        cnt    = ln[14:23].strip()
+        tdw    = ln[23:32].strip()
+        fecha  = ln[32:41].strip()
+        ntran  = ln[41:50].strip()
+        debe   = clean_num(ln[50:71])
+        haber  = clean_num(ln[71:111])
+        saldo  = clean_num(ln[111:])
+
+        texto = ""  # texto NÃO existe no GL0061 bancário, só em algumas contas
+        # Se houver textos após saldo, podemos tentar extrair:
+        if len(ln) > 120:
+            texto = ln[120:].strip()
 
         saldo_real = round(debe - haber, 2)
 
-        # CC inválido? vira vazio
+        # CC inválido vira ""
         if not cc.isdigit():
             cc = ""
 
