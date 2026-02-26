@@ -52,10 +52,11 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
 
     for ln in linhas:
         ln_strip = ln.strip()
-
-        if re.match(r"^\d{6}", ln_strip):
+    
+        # CTA = linha que começa com 6 dígitos
+        if re.match(r"^\d{6}\b", ln_strip):
             current_cta = ln_strip.split()[0]
-
+        
         m = reg.search(ln_strip)
         if m:
             cc = m.group(1)
