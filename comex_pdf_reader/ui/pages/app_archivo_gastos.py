@@ -97,16 +97,17 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
 
         dados.append([
             cta_header, cc, prod, cnt, tdw,
-            fecha, ntran, debe, haber, saldo, saldo_real, texto
-        ])
-
+            fecha, ntran, debe, haber,
+            saldo_real, saldo,  # << invertido
+            texto])
+        
     cols = [
         "CTA","CC","PROD","CNT","TDW",
         "Fecha","Transacción",
-        "Debe","Haber","Saldo",
-        "Saldo Real","Texto"
-    ]
-
+        "Debe","Haber",
+        "Saldo Real","Saldo",  # << invertido
+        "Texto"]
+    
     return pd.DataFrame(dados, columns=cols)
 
 # ============================================================
