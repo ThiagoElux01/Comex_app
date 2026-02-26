@@ -60,65 +60,6 @@ def _fmt_num_2dec_point(value) -> str:
 def _str_or_empty(x) -> str:
     return "" if x is None or (isinstance(x, float) and np.isnan(x)) else str(x).strip()
 
-def limpiar_plantilla_contra_cuenta(
-    df_pg: pd.DataFrame,
-    df_cuenta: pd.DataFrame,
-    chave_col: str = "Chave"
-) -> tuple[pd.DataFrame, dict]:
-    """
-    Remove, na Plantilla de Gastos, os excedentes de linhas por 'Chave', de modo que:
-      - Para cada chave presente em 'df_cuenta', a Plantilla mantém APENAS a mesma quantidade de ocorrências.
-      - Chaves que não existem em 'df_cuenta' NÃO são alteradas.
-    Mantém a ordem original da Plantilla (estável).
-    
-    Retorna:
-      (df_limpo, stats) onde stats contém contagens e lista por chave do que foi removido.
-    """
-    if chave_col not in df_pg.columns:
-        raise ValueError("Plantilla de Gastos não contém a coluna 'Chave'. Rode a etapa da Plantilla antes.")
-    if chave_col not in df_cuenta.columns:
-        raise ValueError("Cuenta (GL0061) não contém a coluna 'Chave'. Rode a etapa de Cuenta antes.")
-
-    # Contagens por chave nos dois DFs
-    cnt_cuenta = df_cuenta[chave_col].value_counts(dropna=False)
-    cnt_pg     = df_pg[chave_col].value_counts(dropna=False)
-
-    # Limite de ocorrências permitidas na Plantilla para chaves presentes na Cuenta
-    keep_limit = df_pg[chave_col].map(cnt_cuenta)  # NaN para chaves NÃO presentes na Cuenta
-
-    # Ranking estável por chave na Plantilla
-    rank = df_pg.groupby(chave_col).cumcount() + 1
-
-    # Mantém:
-    #  - Todas as chaves que NÃO estão na Cuenta (keep_limit.isna())
-    #  - E, para as que estão, somente até o limite (rank <= keep_limit)
-    mask_keep = keep_limit.isna() | (rank <= keep_limit.fillna(np.inf))
-
-    df_clean = df_pg[mask_keep].copy()
-    df_clean.reset_index(drop=True, inplace=True)
-
-    # Estatísticas
-    removed_total = int((~mask_keep).sum())
-    keys_reviewed = set(cnt_cuenta.index)
-    keys_with_drop = []
-    removed_by_key = {}
-
-    for k in keys_reviewed:
-        pg_c = int(cnt_pg.get(k, 0))
-        cu_c = int(cnt_cuenta.get(k, 0))
-        if pg_c > cu_c:
-            diff = pg_c - cu_c
-            removed_by_key[str(k)] = diff
-            keys_with_drop.append(k)
-
-    stats = {
-        "rows_original": int(len(df_pg)),
-        "rows_clean": int(len(df_clean)),
-        "rows_removed": removed_total,
-        "keys_with_removal": len(keys_with_drop),
-        "removed_by_key": removed_by_key,  # dict "chave" -> quantidade removida
-    }
-    return df_clean, stats
 # -----------------------------------------------------------------------------
 # Parsers - ESTADO DE CUENTA (.txt)
 # -----------------------------------------------------------------------------
@@ -390,6 +331,11 @@ def render():
     with col_b5:
         limpieza_pg_clicked = st.button("Limpieza Plantilla Gastos", use_container_width=True)
 
+    # Se clicou em limpeza, leva para a aba Plantilla e mostra aviso
+    if limpieza_pg_clicked:
+        _set_mode("plantilla")
+        st.session_state["aag_state"]["show_cleaning_hint"] = True
+
     mode = st.session_state["aag_mode"]
     st.divider()
 
@@ -492,101 +438,7 @@ def render():
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                 )
-    # ====== AÇÃO: Limpieza Plantilla Gastos ======
-        if limpieza_pg_clicked:
-            st.subheader("🧹 Limpieza da Plantilla de Gastos")
-            try:
-                df_pg = st.session_state.get("aag_plantilla_df", None)
-                df_ct = st.session_state.get("aag_cuenta_df", None)
-    
-                if df_pg is None or df_pg.empty:
-                    st.error("Antes de limpar, carregue e execute a **Plantilla de Gastos**.")
-                elif df_ct is None or df_ct.empty:
-                    st.error("Antes de limpar, carregue e processe o **Archivo de Cuenta (GL0061)**.")
-                else:
-                    # Executa limpeza baseada nas chaves da Cuenta
-                    df_pg_clean, stats = limpiar_plantilla_contra_cuenta(df_pg, df_ct, chave_col="Chave")
-    
-                    # Atualiza a sessão com a versão limpa
-                    st.session_state["aag_plantilla_df"] = df_pg_clean.copy()
-                    st.session_state["aag_state"]["last_action"] = "limpieza_pg"
-    
-                    # Métricas e resumo
-                    c1, c2, c3, c4 = st.columns(4)
-                    with c1:
-                        st.metric("Linhas (Original)", f"{stats['rows_original']:,}".replace(",", "."))
-                    with c2:
-                        st.metric("Linhas (Limpo)", f"{stats['rows_clean']:,}".replace(",", "."))
-                    with c3:
-                        st.metric("Removidas", f"{stats['rows_removed']:,}".replace(",", "."))
-                    with c4:
-                        st.metric("Chaves Ajustadas", f"{stats['keys_with_removal']:,}".replace(",", "."))
-    
-                    if stats["rows_removed"] == 0:
-                        st.info("Nenhuma divergência de contagem encontrada. Nada foi removido.")
-                    else:
-                        with st.expander("Ver detalhes por chave (quantidade removida)"):
-                            # Mostrar uma pequena tabela de remoções por chave
-                            det = pd.DataFrame(
-                                [{"Chave": k, "Removidas": v} for k, v in stats["removed_by_key"].items()]
-                            ).sort_values(by="Removidas", ascending=False)
-                            st.dataframe(det, use_container_width=True, height=280)
-    
-                    # Visualização da versão limpa
-                    st.caption("Prévia da Plantilla de Gastos (após limpeza):")
-                    df_pg_prev = st.session_state["aag_plantilla_df"]
-    
-                    # Detecta colunas para formatação no download
-                    # (mesma lógica da seção Plantilla para Amount e datas)
-                    amount_col_view = None
-                    for c in df_pg_prev.columns:
-                        if str(c).strip().lower() == "amount":
-                            amount_col_view = c
-                            break
-                    if amount_col_view is None:
-                        candidates = [c for c in df_pg_prev.columns if "amount" in str(c).strip().lower()]
-                        if candidates:
-                            amount_col_view = candidates[0]
-    
-                    known_date_keys = {"transactiondate","duedate","due_date","invoicedate","invoice_date"}
-                    found_date_cols_view = [c for c in df_pg_prev.columns if c.lower().replace(" ", "_") in known_date_keys]
-    
-                    col_cfg = {}
-                    if amount_col_view:
-                        col_cfg[str(amount_col_view)] = st.column_config.NumberColumn(format="%.2f")
-                    for dc in found_date_cols_view:
-                        col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
-    
-                    st.dataframe(df_pg_prev, use_container_width=True, height=520, column_config=col_cfg)
-    
-                    # Downloads do resultado limpo
-                    col_csv, col_xlsx = st.columns(2)
-                    with col_csv:
-                        st.download_button(
-                            "Baixar CSV (Plantilla Limpia)",
-                            df_pg_prev.to_csv(index=False).encode("utf-8"),
-                            "plantilla_gastos_limpia.csv",
-                            "text/csv",
-                            use_container_width=True
-                        )
-                    with col_xlsx:
-                        xlsx_bytes = to_xlsx_bytes_format(
-                            df_pg_prev,
-                            sheet_name="PlantillaGastos (Limpia)",
-                            numeric_cols=[amount_col_view] if amount_col_view else [],
-                            date_cols=[c for c in df_pg_prev.columns if pd.api.types.is_datetime64_any_dtype(df_pg_prev[c]) or c in found_date_cols_view],
-                        )
-                        st.download_button(
-                            "Baixar XLSX (Plantilla Limpia)",
-                            xlsx_bytes,
-                            "plantilla_gastos_limpia.xlsx",
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True
-                        )
-    
-            except Exception as e:
-                st.error("Erro durante a limpeza da Plantilla de Gastos.")
-                st.exception(e)
+
     # -------------------------------------------------------------------------
     # Modo: Plantilla de Gastos (.xlsx/.xls)
     # -------------------------------------------------------------------------
@@ -594,6 +446,11 @@ def render():
         upl_key_pg = st.session_state["aag_state"].setdefault("uploader_key_pg", "aag_pg_upl_1")
 
         st.caption("Carregue o arquivo **Excel** da *Plantilla de Gastos* (primeira aba será lida).")
+        if st.session_state["aag_state"].get("show_cleaning_hint"):
+            st.info("ℹ️ Dica: após carregar a planilha, use o botão **Limpeza Rápida** para normalizar datas, valores e remover linhas completamente vazias.")
+            # Consome o hint para não repetir sempre
+            st.session_state["aag_state"]["show_cleaning_hint"] = False
+
         uploaded_xl = st.file_uploader(
             "Selecionar arquivo (.xlsx ou .xls)",
             type=["xlsx", "xls"],
@@ -645,7 +502,6 @@ def render():
                     "transactiondate": None,
                     "due_date": None,
                     "invoicedate": None,
-                    "invoice_date": None,
                 }
                 # Mapear colunas do DF a alvos
                 found_date_cols = []
@@ -656,7 +512,6 @@ def render():
                     elif nc in ("duedate", "due_date"):
                         date_targets["due_date"] = c
                     elif nc in ("invoicedate", "invoice_date"):
-                        # Prioriza a primeira encontrada
                         if date_targets.get("invoicedate") is None:
                             date_targets["invoicedate"] = c
 
@@ -713,6 +568,29 @@ def render():
         if "aag_plantilla_df" in st.session_state and isinstance(st.session_state["aag_plantilla_df"], pd.DataFrame):
             df_pg = st.session_state["aag_plantilla_df"]
 
+            # Ação de Limpeza Rápida (opcional)
+            with st.expander("🧹 Limpeza Rápida (opcional)"):
+                c1, c2, c3 = st.columns(3)
+                do_strip = c1.checkbox("Remover espaços em texto", value=True)
+                drop_empty = c2.checkbox("Remover linhas totalmente vazias", value=True)
+                dedup_key = c3.checkbox("Remover duplicadas por 'Chave' (se existir)", value=False)
+                if st.button("Aplicar Limpeza", use_container_width=True):
+                    df_clean = df_pg.copy()
+                    # strip em colunas de texto
+                    if do_strip:
+                        for col in df_clean.columns:
+                            if df_clean[col].dtype == object:
+                                df_clean[col] = df_clean[col].apply(lambda x: x.strip() if isinstance(x, str) else x)
+                    # remove totalmente vazias
+                    if drop_empty:
+                        df_clean = df_clean.dropna(how="all")
+                    # dedup por Chave
+                    if dedup_key and "Chave" in df_clean.columns:
+                        df_clean = df_clean.drop_duplicates(subset=["Chave"])
+                    st.session_state["aag_plantilla_df"] = df_clean
+                    df_pg = df_clean
+                    st.success("Limpeza aplicada.")
+
             # Recalcula col_cfg baseado no DF salvo (mantém formatação)
             # Detecta Amount para a visualização
             amount_col_view = None
@@ -752,12 +630,16 @@ def render():
                     use_container_width=True,
                 )
             with col_xlsx:
+                # date_cols: se dtype datetime64 ou se for uma das encontradas por nome
+                detected_date_cols = [
+                    c for c in df_pg.columns
+                    if pd.api.types.is_datetime64_any_dtype(df_pg[c]) or c in found_date_cols_view
+                ]
                 xlsx_bytes = to_xlsx_bytes_format(
                     df_pg,
                     sheet_name="PlantillaGastos",
                     numeric_cols=[amount_col_view] if amount_col_view else [],
-                    # Tenta aplicar formato de data nas colunas reconhecidas como datetime
-                    date_cols=[c for c in df_pg.columns if pd.api.types.is_datetime64_any_dtype(df_pg[c]) or c in found_date_cols_view],
+                    date_cols=detected_date_cols,
                 )
                 st.download_button(
                     label="Baixar XLSX (Plantilla Gastos)",
