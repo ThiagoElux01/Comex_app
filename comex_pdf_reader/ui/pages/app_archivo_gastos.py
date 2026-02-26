@@ -41,7 +41,6 @@ def _fmt_date_ddmmyyyy(value) -> str:
     if pd.isna(value):
         return ""
     try:
-        # já pode vir como datetime.date, datetime64, string, etc.
         dt = pd.to_datetime(value, dayfirst=True, errors="coerce")
         if pd.isna(dt):
             return ""
@@ -70,16 +69,10 @@ def limpiar_plantilla_contra_cuenta(
     tol_soma: float = 0.005
 ) -> tuple[pd.DataFrame, dict]:
     """
-    Remove, na Plantilla de Gastos, os excedentes de linhas por 'Chave', de modo que:
-      - Para cada chave presente em 'df_cuenta', a Plantilla mantém APENAS a mesma quantidade de ocorrências (por chave normalizada).
-      - Chaves que não existem em 'df_cuenta' NÃO são alteradas.
-    Mantém a ordem original da Plantilla (estável).
-
-    Além disso, aplica um 'guard':
-      - Se a contagem e a soma por chave (Cuenta vs Plantilla) estiverem iguais (dentro de uma tolerância), não remove nada nessa chave.
-
-    Retorna:
-      (df_limpo, stats) onde stats contém contagens e lista por chave do que foi removido.
+    Remove excedentes na Plantilla por 'Chave' para igualar a contagem às ocorrências no GL0061.
+    - Só afeta chaves presentes na Cuenta.
+    - Mantém a ordem original.
+    - Guard: se contagem e soma por chave batem (dentro da tolerância), não remove nada.
     """
     if chave_col not in df_pg.columns:
         raise ValueError("Plantilla de Gastos não contém a coluna 'Chave'. Rode a etapa da Plantilla antes.")
@@ -90,9 +83,9 @@ def limpiar_plantilla_contra_cuenta(
     def _norm_key_series(s: pd.Series) -> pd.Series:
         return (
             s.astype(str)
-             .str.replace("\u2212", "-", regex=False)  # minus unicode -> "-"
-             .str.replace("\xa0", " ", regex=False)    # NBSP -> espaço normal
-             .str.replace(r"\s+", " ", regex=True)     # múltiplos espaços -> 1
+             .str.replace("\u2212", "-", regex=False)  # minus unicode → "-"
+             .str.replace("\xa0", " ", regex=False)    # NBSP → espaço normal
+             .str.replace(r"\s+", " ", regex=True)     # múltiplos espaços → 1
              .str.strip()
         )
 
@@ -101,49 +94,43 @@ def limpiar_plantilla_contra_cuenta(
     df_pg["_key_norm"] = _norm_key_series(df_pg[chave_col])
     df_cuenta["_key_norm"] = _norm_key_series(df_cuenta[chave_col])
 
-    # Para exibir as chaves nos detalhes, usa a primeira forma "original" por _key_norm
+    # Para exibir nos detalhes, guarda a 1ª forma original por chave normalizada
     first_original_key = df_pg.groupby("_key_norm")[chave_col].first()
 
-    # --- Contagens por chave normalizada ---
+    # Contagens por chave normalizada
     cnt_pg = df_pg["_key_norm"].value_counts()
     cnt_cuenta = df_cuenta["_key_norm"].value_counts()
 
-    # --- Somas por chave (para o guard) ---
-    # Detecta Amount na Plantilla
+    # Somas por chave (para guard)
     amount_col = None
     for c in df_pg.columns:
         cl = str(c).strip().lower()
         if cl == "amount" or "amount" in cl:
             amount_col = c
             break
-
-    # Detecta 'Saldo Real' na Cuenta
     cuenta_amt_col = "Saldo Real" if "Saldo Real" in df_cuenta.columns else None
 
-    sum_pg = None
-    sum_cuenta = None
+    sum_pg = pd.Series(dtype=float)
+    sum_cuenta = pd.Series(dtype=float)
     if amount_col is not None:
         sum_pg = pd.to_numeric(df_pg[amount_col], errors="coerce").groupby(df_pg["_key_norm"]).sum(min_count=1)
     if cuenta_amt_col is not None:
         sum_cuenta = pd.to_numeric(df_cuenta[cuenta_amt_col], errors="coerce").groupby(df_cuenta["_key_norm"]).sum(min_count=1)
 
-    # --- Mapa de limite a manter (quantidade de ocorrências permitidas na Plantilla) ---
+    # Limite de ocorrências (por chave) permitidas na Plantilla = contagem na Cuenta
     keep_limit_map = cnt_cuenta.to_dict()
 
     # Ranking estável por chave na Plantilla
     rank = df_pg.groupby("_key_norm").cumcount() + 1
-
-    # Limite mapeado por linha
     keep_limit = df_pg["_key_norm"].map(keep_limit_map)
 
-    # Regra base:
-    #  - mantém chaves não presentes na Cuenta (keep_limit NaN)
-    #  - mantém até o limite de ocorrências para chaves presentes na Cuenta
+    # Mantém:
+    # - chaves NÃO presentes na Cuenta (keep_limit NaN)
+    # - para as presentes, até o limite
     mask_keep = keep_limit.isna() | (rank <= keep_limit.fillna(np.inf))
 
-    # --- Guard de segurança: se contagem e soma por chave batem, não remova nada dessa chave ---
-    if sum_pg is not None and sum_cuenta is not None:
-        # identifica chaves onde contagem e soma batem
+    # Guard: se contagem e soma batem, preserva tudo daquela chave
+    if not sum_pg.empty and not sum_cuenta.empty:
         keys_ok = []
         for k, cpg in cnt_pg.items():
             cct = int(cnt_cuenta.get(k, 0))
@@ -153,14 +140,11 @@ def limpiar_plantilla_contra_cuenta(
                 if abs(spg - scu) <= tol_soma:
                     keys_ok.append(k)
         if keys_ok:
-            # garante que todas as ocorrências dessas chaves sejam mantidas
             mask_keep = mask_keep | df_pg["_key_norm"].isin(keys_ok)
 
-    # Aplica a máscara
+    # Resultado
     df_clean = df_pg[mask_keep].copy().reset_index(drop=True)
-    # Remove coluna técnica
-    if "_key_norm" in df_clean.columns:
-        df_clean.drop(columns=["_key_norm"], inplace=True, errors="ignore")
+    df_clean.drop(columns=["_key_norm"], inplace=True, errors="ignore")
 
     # Estatísticas
     removed_total = int((~mask_keep).sum())
@@ -170,8 +154,7 @@ def limpiar_plantilla_contra_cuenta(
         cct = int(cnt_cuenta.get(k, 0))
         if cpg > cct and cct > 0:
             diff = cpg - cct
-            # exibir chave na forma original (a 1ª ocorrência na Plantilla)
-            k_disp = str(first_original_key.get(k, k))
+            k_disp = str(first_original_key.get(k, k))  # forma original para exibição
             removed_by_key[k_disp] = diff
             keys_with_drop.append(k)
 
@@ -190,9 +173,7 @@ def limpiar_plantilla_contra_cuenta(
 _NUM = r"(\-?\d[\d,]*\.\d{2}\-?)"  # número com milhares e 2 decimais; pode terminar com '-' (negativo)
 
 def _clean_num(s: str) -> float | None:
-    """
-    Converte strings como '12,345.67-' em float (negativo).
-    """
+    """Converte strings como '12,345.67-' em float (negativo)."""
     if s is None:
         return None
     s = str(s).strip()
@@ -342,8 +323,7 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
 
     df = pd.DataFrame(dados, columns=cols)
 
-    # === Ajuste de data no dataframe de cuentas ===
-    # Se houver coluna 'Fechado' (alguns dumps usam esse nome), trata também.
+    # Ajuste de data
     for date_col in ["Fecha", "Fechado"]:
         if date_col in df.columns:
             df[date_col] = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True).dt.date
@@ -369,11 +349,9 @@ def to_xlsx_bytes_format(
 
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        # Para manter tipo data no Excel, converte objetos date para datetime64[ns] (sem horário)
         df_to_save = df.copy()
         for dc in date_cols:
             if dc in df_to_save.columns:
-                # Se a coluna está como datetime.date, converte para datetime64
                 df_to_save[dc] = pd.to_datetime(df_to_save[dc], errors="coerce")
 
         df_to_save.to_excel(writer, index=False, sheet_name=sheet_name)
@@ -405,7 +383,6 @@ def to_xlsx_bytes_format(
             col_idx = df_to_save.columns.get_loc(col_name) + 1
             for row in range(2, ws.max_row + 1):
                 cell = ws.cell(row=row, column=col_idx)
-                # openpyxl trata datetime como Python datetime; só aplicar formato
                 if cell.value:
                     cell.number_format = 'dd/mm/yyyy'
 
@@ -433,12 +410,12 @@ def render():
     _ensure_state()
     st.subheader("Aplicación Archivo Gastos")
 
-   # Botões principais (agora com CUENTA + Limpieza)
+    # Botões principais (agora com CUENTA + Limpieza)
     col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns(5)
-    
-    # ✅ garante que a variável exista no escopo, evitando NameError
-    limpieza_pg_clicked = False
-    
+
+    # ✅ garante variável definida, evitando NameError
+    limpeza_pg_clicked = False
+
     with col_b1:
         if st.button("Estado de Cuenta", use_container_width=True):
             _set_mode("estado")
@@ -454,15 +431,15 @@ def render():
     with col_b4:
         if st.button("Cuenta", use_container_width=True):
             _set_mode("cuenta")
-    
+
     with col_b5:
-        # ✅ ao clicar, seta True (em vez de atribuir direto à variável fora)
         if st.button("Limpieza Plantilla Gastos", use_container_width=True):
             limpeza_pg_clicked = True
-    
+
     mode = st.session_state["aag_mode"]
     st.divider()
-    
+
+    # ====== AÇÃO: Limpieza Plantilla Gastos (global, independente da aba) ======
     if limpeza_pg_clicked:
         st.subheader("🧹 Limpieza da Plantilla de Gastos")
         try:
@@ -501,7 +478,7 @@ def render():
                         ).sort_values(by="Removidas", ascending=False)
                         st.dataframe(det, use_container_width=True, height=280)
 
-                # Visualização da versão limpa
+                # Prévia e downloads do resultado limpo
                 st.caption("Prévia da Plantilla de Gastos (após limpeza):")
                 df_pg_prev = st.session_state["aag_plantilla_df"]
 
@@ -527,7 +504,6 @@ def render():
 
                 st.dataframe(df_pg_prev, use_container_width=True, height=520, column_config=col_cfg)
 
-                # Downloads do resultado limpo
                 col_csv, col_xlsx = st.columns(2)
                 with col_csv:
                     st.download_button(
@@ -606,17 +582,15 @@ def render():
 
                 pbar.progress(70, text="Preparando visualização...")
                 st.success("Arquivo processado com sucesso.")
-                # Exibição será feita abaixo a partir do DF salvo
                 pbar.progress(100, text="Concluído.")
             except Exception as e:
                 st.error("Erro ao processar o arquivo .txt.")
                 st.exception(e)
 
-        # --- Sempre que houver DF salvo, exibe (mesmo sem clicar em Executar agora) ---
+        # Exibição (com linha TOTAL)
         if "aag_estado_df" in st.session_state and isinstance(st.session_state["aag_estado_df"], pd.DataFrame):
             df_base = st.session_state["aag_estado_df"]
 
-            # Monta linha TOTAL para exibição/exports
             df = df_base.copy()
             numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
             for c in numeric_cols:
@@ -705,8 +679,7 @@ def render():
                     st.error("Coluna 'Amount' não encontrada no arquivo.")
                     return
 
-                # === Datas na Plantilla: TransactionDate, Due_Date, Invoice_Date ===
-                # normalizador de nomes para encontrar colunas mesmo com variações
+                # Datas na Plantilla
                 def norm(s: str) -> str:
                     return re.sub(r"[^a-z0-9]", "", str(s).strip().lower())
 
@@ -716,7 +689,6 @@ def render():
                     "invoicedate": None,
                     "invoice_date": None,
                 }
-                # Mapear colunas do DF a alvos
                 found_date_cols = []
                 for c in df_pg.columns:
                     nc = norm(c)
@@ -725,21 +697,18 @@ def render():
                     elif nc in ("duedate", "due_date"):
                         date_targets["due_date"] = c
                     elif nc in ("invoicedate", "invoice_date"):
-                        # Prioriza a primeira encontrada
                         if date_targets.get("invoicedate") is None:
                             date_targets["invoicedate"] = c
 
-                # Converte cada coluna encontrada para data (dd/mm/aaaa)
                 for key, col in date_targets.items():
                     if col and col in df_pg.columns:
                         df_pg[col] = pd.to_datetime(df_pg[col], errors="coerce", dayfirst=True).dt.date
                         found_date_cols.append(col)
 
-                # Garante tipo numérico em Amount
+                # Amount numérico
                 df_pg[amount_col] = pd.to_numeric(df_pg[amount_col], errors="coerce")
 
-                # === Criar coluna 'Chave' na Plantilla de Gastos ===
-                # Detecta campos necessários (case-insensitive, tolerando variações)
+                # Criar 'Chave' na Plantilla
                 def _find_col_ci(df: pd.DataFrame, targets: list[str]):
                     cols_map = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in df.columns}
                     for t in targets:
@@ -751,15 +720,13 @@ def render():
                 cuenta_col    = _find_col_ci(df_pg, ["Cuenta"])
                 tdate_col     = _find_col_ci(df_pg, ["TransactionDate", "Transaction Date", "TransDate"])
                 tno_col       = _find_col_ci(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
-                amount_col_ci = amount_col  # já detectado acima
+                amount_col_ci = amount_col
                 
-                # Converter datas detectadas para dd/mm/aaaa (string) e números para 2 casas
                 tdate_str  = df_pg[tdate_col].apply(_fmt_date_ddmmyyyy) if tdate_col else ""
                 tno_str    = df_pg[tno_col].apply(_str_or_empty) if tno_col else ""
                 cuenta_str = df_pg[cuenta_col].apply(_str_or_empty) if cuenta_col else ""
                 amount_str = df_pg[amount_col_ci].apply(_fmt_num_2dec_point) if amount_col_ci else ""
                 
-                # Concatena com pipe
                 df_pg["Chave"] = (
                     (cuenta_str if isinstance(cuenta_str, pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
                     (tdate_str  if isinstance(tdate_str,  pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
@@ -767,23 +734,19 @@ def render():
                     (amount_str if isinstance(amount_str, pd.Series) else pd.Series([""]*len(df_pg)))
                 )
                 
-                # Salva o DF para uso na aba Analise (agora com 'Chave')
                 st.session_state["aag_plantilla_df"] = df_pg.copy()
 
                 pbar.progress(70, text="Preparando visualização...")
                 st.success("Arquivo carregado com sucesso.")
-
                 pbar.progress(100, text="Concluído.")
             except Exception as e:
                 st.error("Erro ao processar o arquivo Excel.")
                 st.exception(e)
 
-        # --- Sempre que houver DF salvo, exibe (mesmo sem clicar em Executar agora) ---
+        # Exibição e downloads
         if "aag_plantilla_df" in st.session_state and isinstance(st.session_state["aag_plantilla_df"], pd.DataFrame):
             df_pg = st.session_state["aag_plantilla_df"]
 
-            # Recalcula col_cfg baseado no DF salvo (mantém formatação)
-            # Detecta Amount para a visualização
             amount_col_view = None
             for c in df_pg.columns:
                 if str(c).strip().lower() == "amount":
@@ -794,7 +757,6 @@ def render():
                 if candidates:
                     amount_col_view = candidates[0]
 
-            # Detecta colunas de data conhecidas para exibição
             known_date_keys = {"transactiondate","duedate","due_date","invoicedate","invoice_date"}
             found_date_cols_view = [c for c in df_pg.columns if c.lower().replace(" ", "_") in known_date_keys]
 
@@ -804,12 +766,7 @@ def render():
             for dc in found_date_cols_view:
                 col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
 
-            st.dataframe(
-                df_pg,
-                use_container_width=True,
-                height=550,
-                column_config=col_cfg,
-            )
+            st.dataframe(df_pg, use_container_width=True, height=550, column_config=col_cfg)
 
             col_csv, col_xlsx = st.columns(2)
             with col_csv:
@@ -825,7 +782,6 @@ def render():
                     df_pg,
                     sheet_name="PlantillaGastos",
                     numeric_cols=[amount_col_view] if amount_col_view else [],
-                    # Tenta aplicar formato de data nas colunas reconhecidas como datetime
                     date_cols=[c for c in df_pg.columns if pd.api.types.is_datetime64_any_dtype(df_pg[c]) or c in found_date_cols_view],
                 )
                 st.download_button(
@@ -839,14 +795,12 @@ def render():
     # -------------------------------------------------------------------------
     # Modo: Analise — compara Estado de Cuenta (CTA/Período) x Plantilla (Cuenta/Amount)
     # -------------------------------------------------------------------------
-    elif mode == "asientos":  # Analise
+    elif mode == "asientos":
         st.subheader("🔍 Analise: Estado de Cuenta x Plantilla de Gastos")
 
-        # Recupera datasets da sessão
-        df_ec = st.session_state.get("aag_estado_df", None)       # Estado de Cuenta (sem linha TOTAL)
-        df_pg = st.session_state.get("aag_plantilla_df", None)    # Plantilla de Gastos (primeira aba)
+        df_ec = st.session_state.get("aag_estado_df", None)
+        df_pg = st.session_state.get("aag_plantilla_df", None)
 
-        # Checagens
         missing = []
         if df_ec is None or df_ec.empty:
             missing.append("Estado de Cuenta (.txt)")
@@ -860,21 +814,15 @@ def render():
             )
             return
 
-        # Parâmetros
         tol = st.number_input("Valor de Tolerância", min_value=0.00, value=0.01, step=0.01)
 
-        # Helpers
         def _norm_conta(x) -> str:
-            """Normaliza o número da conta: apenas dígitos; remove zeros à esquerda."""
             s = re.sub(r"\D", "", str(x))
             s = s.lstrip("0")
             return s if s else ""
 
         pbar = st.progress(0, text="Consolidando Estado de Cuenta...")
 
-        # -----------------------
-        # 1) Estado de Cuenta (CTA/Período)
-        # -----------------------
         try:
             if "CTA" not in df_ec.columns or "Período" not in df_ec.columns:
                 st.error("Estado de Cuenta não contém as colunas esperadas: 'CTA' e 'Período'.")
@@ -897,11 +845,7 @@ def render():
             st.exception(e)
             return
 
-        # -----------------------
-        # 2) Plantilla de Gastos (Cuenta/Amount)
-        # -----------------------
         try:
-            # Detecta colunas 'Cuenta' e 'Amount' (case-insensitive)
             def _find_col(df, target):
                 for c in df.columns:
                     if str(c).strip().lower() == target:
@@ -933,9 +877,6 @@ def render():
             st.exception(e)
             return
 
-        # -----------------------
-        # 3) Comparação
-        # -----------------------
         try:
             df_cmp = pd.merge(df_ec_agg, df_pg_agg, on="Cuenta", how="outer")
             for c in ["Saldo_Estado_Cuenta", "Saldo_Plantilla_Gastos"]:
@@ -943,16 +884,13 @@ def render():
 
             df_cmp["Diferença"] = (df_cmp["Saldo_Plantilla_Gastos"] - df_cmp["Saldo_Estado_Cuenta"]).round(2)
 
-            # Flag só para filtro (não exibida)
             df_cmp["_div"] = df_cmp["Diferença"].abs() > float(tol)
 
-            # Ordenação por número da conta (ordem numérica crescente)
             df_cmp["_cuenta_num"] = pd.to_numeric(df_cmp["Cuenta"], errors="coerce")
             df_cmp = df_cmp.sort_values(by="_cuenta_num", ascending=True).drop(columns=["_cuenta_num"]).reset_index(drop=True)
 
             pbar.progress(90, text="Preparando visualização...")
 
-            # Métricas
             c1, c2, c3 = st.columns(3)
             with c1:
                 st.metric("Contas (Estado)", f"{df_ec_agg['Cuenta'].nunique():,}".replace(",", "."))
@@ -967,11 +905,9 @@ def render():
                     f"{df_pg_agg['Saldo_Plantilla_Gastos'].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
                 )
 
-            # Filtro: apenas divergentes
             only_div = st.checkbox("Mostrar apenas contas com divergência", value=True)
             df_show = df_cmp[df_cmp["_div"]] if only_div else df_cmp
 
-            # Exibição sem coluna de controle
             df_show = df_show[["Cuenta", "Saldo_Estado_Cuenta", "Saldo_Plantilla_Gastos", "Diferença"]]
 
             st.dataframe(
@@ -986,7 +922,6 @@ def render():
 
             pbar.progress(95, text="Gerando arquivos para download...")
 
-            # Downloads (já ordenados pela Cuenta)
             col_d1, col_d2 = st.columns(2)
             with col_d1:
                 st.download_button(
@@ -1064,14 +999,11 @@ def render():
             
             df["Chave"] = cta_str + "|" + fecha_str + "|" + tran_str + "|" + sreal_str
             
-            # Salva com 'Chave'
             st.session_state["aag_cuenta_df"] = df.copy()
 
-        # --- Sempre que houver DF salvo, exibe (mesmo sem clicar em Processar agora) ---
         if "aag_cuenta_df" in st.session_state and isinstance(st.session_state["aag_cuenta_df"], pd.DataFrame):
             df = st.session_state["aag_cuenta_df"]
 
-            # Colunas de data para exibição (Fecha e/ou Fechado)
             date_cols = [c for c in ["Fecha", "Fechado"] if c in df.columns]
             col_cfg = {
                 "Debe": st.column_config.NumberColumn(format="%.2f"),
@@ -1082,12 +1014,7 @@ def render():
             for dc in date_cols:
                 col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
 
-            st.dataframe(
-                df,
-                use_container_width=True,
-                height=600,
-                column_config=col_cfg,
-            )
+            st.dataframe(df, use_container_width=True, height=600, column_config=col_cfg)
 
             col1, col2 = st.columns(2)
             with col1:
