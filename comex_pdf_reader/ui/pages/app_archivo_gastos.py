@@ -43,84 +43,158 @@ def _set_mode(mode: str):
 def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     linhas = texto.splitlines()
     dados = []
-    current_cta = None
 
-    # Detecta CTA: 6 dígitos + espaço
-    reg_cta = re.compile(r"^\s*(\d{6})\s+")
+    # ============================================================
+    # 1) Captura CTA a partir do cabeçalho
+    # ============================================================
+    cta_header = None
+    reg_header = re.compile(r"Nº de cta\.\s+(\d{6})")
+    for ln in linhas[:20]:  # cabeçalho sempre ocorre logo no início
+        m = reg_header.search(ln)
+        if m:
+            cta_header = m.group(1)
+            break
 
-    # Detecta início de linha de movimento:
-    # começa com CC (3 dígitos)
-    reg_mov = re.compile(r"^\s*(\d{3})\s+(.*)$")
+    if not cta_header:
+        raise ValueError("CTA não encontrada no cabeçalho do arquivo.")
 
+    # ============================================================
+    # 2) Funções auxiliares
+    # ============================================================
+    def is_number(x: str):
+        return bool(re.match(r"^-?[\d,]+\.\d{2}$", x))
+
+    def to_number(x: str):
+        return float(x.replace(",", ""))
+
+    def is_date(x: str):
+        return bool(re.match(r"^\d{2}/\d{2}/\d{2}$", x))
+
+    # ============================================================
+    # 3) Linhas a ignorar (cabecalhos, totais, separadores etc.)
+    # ============================================================
+    ignore_patterns = [
+        r"^Electrolux",
+        r"Planificación",
+        r"Moneda nacional",
+        r"Scala",
+        r"CTA\s+Descripción",
+        r"^CC\s",
+        r"^-{3,}",
+        r"^={3,}",
+        r"ACTIVO",
+        r"EXIGIBLES",
+        r"CAJA",
+        r"Saldo Inicial",
+        r"Saldo final",
+        r"^T O T A L",
+        r"Criterios de selección",
+        r"Una Cuenta por Página",
+        r"Totales de Grupo",
+        r"Fecha de Asiento",
+        r"Cuenta\s+:\s+\d",
+    ]
+    ignore_regex = re.compile("|".join(ignore_patterns))
+
+    # ============================================================
+    # 4) Processamento linha a linha
+    # ============================================================
     for ln in linhas:
-        raw = ln.rstrip()
+        raw = ln.strip()
 
-        # --- CTA ---
-        mcta = reg_cta.match(raw)
-        if mcta:
-            current_cta = mcta.group(1)
+        if not raw:
             continue
 
-        # --- Movimento ---
-        mm = reg_mov.match(raw)
-        if not mm:
+        # ignora cabeçalhos e seções
+        if ignore_regex.search(raw):
             continue
 
-        cc = mm.group(1)
-        resto = mm.group(2).strip()
-
-        # Divide tudo da direita para esquerda para capturar corretamente Debe/Haber/Saldo
-        partes = resto.split()
-
-        # Pelo layout, as 3 últimas colunas são SEMPRE:
-        # ... Debe Haber Saldo Texto...
-        if len(partes) < 4:
+        # regras: linha válida deve conter uma data e pelo menos 3 números finais
+        parts = raw.split()
+        if len(parts) < 5:
             continue
 
-        # Extrai de trás para frente
-        try:
-            saldo = float(partes[-1].replace(",", ""))
-            haber = float(partes[-2].replace(",", ""))
-            debe = float(partes[-3].replace(",", ""))
-        except:
-            continue
-
-        # Remove Debe/Haber/Saldo da lista
-        partes = partes[:-3]
-
-        # A data é SEMPRE o primeiro token que bate com dd/mm/yy
+        # procura data
         idx_data = None
-        for i, tok in enumerate(partes):
-            if re.match(r"\d{2}/\d{2}/\d{2}", tok):
+        for i, tok in enumerate(parts):
+            if is_date(tok):
                 idx_data = i
                 break
-
         if idx_data is None:
+            continue  # linha sem data → não é lançamento
+
+        # últimos três tokens precisam ser numeros → Debe, Haber, Saldo
+        if len(parts) < 3:
+            continue
+        tok_saldo = parts[-1]
+        tok_haber = parts[-2]
+        tok_debe = parts[-3]
+        if not (is_number(tok_saldo) and is_number(tok_haber) and is_number(tok_debe)):
             continue
 
-        # PROD / CNT / TDW = tudo entre CC e a data, se existirem
-        meta = partes[:idx_data]
-        fecha = partes[idx_data]
-        ntran = partes[idx_data + 1] if idx_data + 1 < len(partes) else ""
-
-        # Texto: tudo após Nºtran
-        texto_rest = " ".join(partes[idx_data + 2 :])
-
-        # Ajusta PROD / CNT / TDW
-        prod = meta[0] if len(meta) >= 1 else ""
-        cnt = meta[1] if len(meta) >= 2 else ""
-        tdw = meta[2] if len(meta) >= 3 else ""
-
+        # =======================================================
+        # Extração dos campos finais
+        # =======================================================
+        saldo = to_number(tok_saldo)
+        haber = to_number(tok_haber)
+        debe = to_number(tok_debe)
         saldo_real = round(debe - haber, 2)
 
+        # remove os três últimos tokens numéricos
+        middle = parts[:-3]
+
+        # DATA
+        fecha = middle[idx_data]
+        # NºTran
+        ntran = middle[idx_data + 1] if idx_data + 1 < len(middle) else ""
+
+        # TEXTO = tudo depois do NºTran até antes de Debe/Haber/Saldo
+        texto_rest = ""
+        if idx_data + 2 < len(middle):
+            texto_rest = " ".join(middle[idx_data + 2:])
+
+        # =======================================================
+        # Campos antes da data:
+        # Podem ser:
+        # - CC (3 dígitos)
+        # - PROD / CNT / TDW (até 3 tokens)
+        # - ou nenhum (CC vazio)
+        # =======================================================
+        meta = middle[:idx_data]
+
+        cc = ""
+        prod = ""
+        cnt = ""
+        tdw = ""
+
+        # Se o primeiro token for CC válido (3 dígitos)
+        if len(meta) >= 1 and re.match(r"^\d{3}$", meta[0]):
+            cc = meta[0]
+            meta = meta[1:]  # remove CC
+
+        # O restante são PROD/CNT/TDW (0-3 tokens)
+        if len(meta) >= 1:
+            prod = meta[0]
+        if len(meta) >= 2:
+            cnt = meta[1]
+        if len(meta) >= 3:
+            tdw = meta[2]
+
+        # =======================================================
+        # Adiciona linha ao dataset
+        # =======================================================
         dados.append([
-            current_cta, cc, prod, cnt, tdw,
+            cta_header, cc, prod, cnt, tdw,
             fecha, ntran, debe, haber, saldo, saldo_real, texto_rest
         ])
 
+    # ============================================================
+    # 5) Retorno final
+    # ============================================================
     cols = [
         "CTA", "CC", "PROD", "CNT", "TDW",
-        "Fecha", "Transacción", "Debe", "Haber", "Saldo",
+        "Fecha", "Transacción",
+        "Debe", "Haber", "Saldo",
         "Saldo Real", "Texto"
     ]
 
