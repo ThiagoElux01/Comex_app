@@ -303,8 +303,188 @@ def to_xlsx_bytes_format(
     return buffer.getvalue()
 
 # -----------------------------------------------------------------------------
+# ==== NOVOS HELPERS p/ atualização da Plantilla com base em Cuenta ====
+# -----------------------------------------------------------------------------
+
+def _split_chave(chave: str):
+    """
+    Divide 'Chave' no formato: Conta|dd/mm/aaaa|Transacao|9999.99
+    Retorna (conta, data_str, transacao, amount_str).
+    """
+    if not isinstance(chave, str):
+        return "", "", "", ""
+    parts = chave.split("|")
+    while len(parts) < 4:
+        parts.append("")
+    return parts[0].strip(), parts[1].strip(), parts[2].strip(), parts[3].strip()
+
+
+def _find_col_ci(df: pd.DataFrame, targets: list[str]):
+    """
+    Busca uma coluna no DF ignorando maiúsculas/minúsculas e caracteres especiais.
+    Retorna o nome real da coluna no DF ou None.
+    """
+    if df is None or df.empty:
+        return None
+    cols_map = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in df.columns}
+    for t in targets:
+        key = re.sub(r"[^a-z0-9]", "", t.lower())
+        if key in cols_map:
+            return cols_map[key]
+    return None
+
+
+def build_plantilla_atualizada_com_cuenta(
+    df_pg: pd.DataFrame,
+    df_cu: pd.DataFrame,
+    tol: float = 0.01
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Retorna (df_pg_atualizada, df_resumo).
+    - Ajusta somente as chaves da CTA carregada (chaves que começam com 'CTA|').
+    - Para chaves sem diferença de saldo (|sum_pg - sum_cu| <= tol): mantém como está.
+    - Para chaves com diferença: recria o bloco na Plantilla espelhando a contagem e valores do GL (Cuenta).
+    """
+
+    if df_pg is None or df_pg.empty:
+        raise ValueError("Plantilla de Gastos não carregada.")
+    if df_cu is None or df_cu.empty:
+        raise ValueError("Cuenta (GL0061) não carregada.")
+
+    if "Chave" not in df_pg.columns or "Chave" not in df_cu.columns:
+        raise ValueError("Ambos os dataframes precisam ter a coluna 'Chave'.")
+
+    # Detecta colunas essenciais na Plantilla
+    amount_col = _find_col_ci(df_pg, ["Amount"])
+    cuenta_col = _find_col_ci(df_pg, ["Cuenta"])
+    tdate_col  = _find_col_ci(df_pg, ["TransactionDate", "Transaction Date", "TransDate"])
+    tno_col    = _find_col_ci(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
+
+    if amount_col is None:
+        raise ValueError("Coluna 'Amount' não encontrada na Plantilla.")
+
+    # CTA do GL0061 (é único no arquivo)
+    cta_loaded = str(df_cu["CTA"].iloc[0]).strip()
+    cta_prefix = f"{cta_loaded}|"
+
+    # Subconjuntos restritos à CTA
+    df_pg_subset = df_pg[df_pg["Chave"].astype(str).str.startswith(cta_prefix)].copy()
+    df_pg_other  = df_pg[~df_pg["Chave"].astype(str).str.startswith(cta_prefix)].copy()
+    df_cu_subset = df_cu[df_cu["Chave"].astype(str).str.startswith(cta_prefix)].copy()
+
+    # Se não houver linhas na Plantilla para esta CTA, criaremos a partir do GL
+    template_base = (df_pg_subset.iloc[0].copy() if not df_pg_subset.empty else pd.Series({c: None for c in df_pg.columns}))
+
+    # Somas e contagens por Chave (Plantilla x Cuenta)
+    df_pg_subset[amount_col] = pd.to_numeric(df_pg_subset[amount_col], errors="coerce").fillna(0.0)
+    g_pg = df_pg_subset.groupby("Chave", as_index=False).agg(
+        soma_pg=(amount_col, "sum"),
+        n_pg=("Chave", "size")
+    )
+
+    # Em Cuenta, a coluna de comparação é 'Saldo Real'
+    if "Saldo Real" not in df_cu_subset.columns:
+        raise ValueError("No GL0061 processado não há a coluna 'Saldo Real'.")
+
+    df_cu_subset["Saldo Real"] = pd.to_numeric(df_cu_subset["Saldo Real"], errors="coerce").fillna(0.0)
+    g_cu = df_cu_subset.groupby("Chave", as_index=False).agg(
+        soma_cu=("Saldo Real", "sum"),
+        n_cu=("Chave", "size")
+    )
+
+    resumo = pd.merge(g_cu, g_pg, on="Chave", how="outer")
+    resumo["soma_cu"] = pd.to_numeric(resumo["soma_cu"], errors="coerce").fillna(0.0)
+    resumo["soma_pg"] = pd.to_numeric(resumo["soma_pg"], errors="coerce").fillna(0.0)
+    resumo["n_cu"] = pd.to_numeric(resumo["n_cu"], errors="coerce").fillna(0).astype(int)
+    resumo["n_pg"] = pd.to_numeric(resumo["n_pg"], errors="coerce").fillna(0).astype(int)
+    resumo["dif"] = (resumo["soma_pg"] - resumo["soma_cu"]).round(2)
+    resumo["ajustar"] = resumo["dif"].abs() > float(tol)
+
+    # Chaves a manter como estão (sem diferença de saldo)
+    chaves_ok = set(resumo.loc[~resumo["ajustar"], "Chave"].astype(str).tolist())
+
+    # Começa com as linhas atuais da Plantilla que não exigem ajuste
+    linhas_novas = []
+    if not df_pg_subset.empty:
+        linhas_novas.append(df_pg_subset[df_pg_subset["Chave"].isin(chaves_ok)])
+
+    # Para cada chave que precisa de ajuste, reconstruímos com base no GL
+    chaves_ajustar = resumo.loc[resumo["ajustar"], "Chave"].astype(str).tolist()
+
+    # Para acelerar busca de um 'molde' de linha da Plantilla para uma chave específica (se existir)
+    molde_por_chave = {}
+    if not df_pg_subset.empty:
+        # pega a primeira ocorrência como molde
+        molde_por_chave = df_pg_subset.groupby("Chave").head(1).set_index("Chave")
+
+    for chave in chaves_ajustar:
+        # Linhas do GL para essa chave
+        linhas_cu = df_cu_subset[df_cu_subset["Chave"] == chave]
+        if linhas_cu.empty:
+            # Se a chave não existe no GL (caso raro por outer merge), apenas ignora
+            continue
+
+        # Tenta obter um molde da Plantilla da própria chave; se não, usa o template_base
+        if chave in molde_por_chave.index:
+            molde = molde_por_chave.loc[chave].copy()
+        else:
+            molde = template_base.copy()
+
+        # Para cada linha do GL, cria uma linha correspondente na Plantilla
+        for _, rc in linhas_cu.iterrows():
+            row = molde.copy()
+
+            # Ajusta campos essenciais a partir do GL
+            if cuenta_col is not None:
+                row[cuenta_col] = rc.get("CTA", None)
+
+            if tdate_col is not None:
+                # Já está como date em df_cu (tratado no parser), mantenha como date
+                row[tdate_col] = rc.get("Fecha", None)
+
+            if tno_col is not None:
+                row[tno_col] = rc.get("Transacción", None)
+
+            # Amount = Saldo Real da linha do GL
+            row[amount_col] = float(rc.get("Saldo Real", 0.0))
+
+            # Recalcula 'Chave' da Plantilla com o mesmo formato usado no app
+            cta_str   = _str_or_empty(row.get(cuenta_col)) if cuenta_col is not None else _str_or_empty(rc.get("CTA"))
+            tdate_str = _fmt_date_ddmmyyyy(row.get(tdate_col)) if tdate_col is not None else _fmt_date_ddmmyyyy(rc.get("Fecha"))
+            tno_str   = _str_or_empty(row.get(tno_col)) if tno_col is not None else _str_or_empty(rc.get("Transacción"))
+            amt_str   = _fmt_num_2dec_point(row.get(amount_col))
+
+            row["Chave"] = f"{cta_str}|{tdate_str}|{tno_str}|{amt_str}"
+
+            # Garante coerção numérica
+            try:
+                row[amount_col] = float(row[amount_col])
+            except Exception:
+                row[amount_col] = pd.to_numeric(row[amount_col], errors="coerce")
+
+            # Coleta
+            linhas_novas.append(pd.DataFrame([row.to_dict()]))
+
+    # Concatena:
+    bloco_cta_atualizado = pd.concat(linhas_novas, ignore_index=True) if len(linhas_novas) > 0 else pd.DataFrame(columns=df_pg.columns)
+    # Junta com as demais contas não alteradas
+    df_pg_atualizada = pd.concat([df_pg_other, bloco_cta_atualizado], ignore_index=True)
+
+    # Ordena pelas mesmas colunas se existir contagem natural
+    if cuenta_col is not None and tdate_col is not None:
+        df_pg_atualizada = df_pg_atualizada.sort_values(by=[cuenta_col, tdate_col], ascending=[True, True], na_position="last").reset_index(drop=True)
+
+    # Resumo amigável
+    resumo_view = resumo.copy()
+    resumo_view = resumo_view[["Chave", "soma_cu", "soma_pg", "dif", "n_cu", "n_pg", "ajustar"]]
+    resumo_view = resumo_view.sort_values(by="Chave").reset_index(drop=True)
+
+    return df_pg_atualizada, resumo_view
+
+# -----------------------------------------------------------------------------
 # Página
 # -----------------------------------------------------------------------------
+
 def render():
     _ensure_state()
     st.subheader("Aplicación Archivo Gastos")
@@ -508,7 +688,7 @@ def render():
 
                 # === Criar coluna 'Chave' na Plantilla de Gastos ===
                 # Detecta campos necessários (case-insensitive, tolerando variações)
-                def _find_col_ci(df: pd.DataFrame, targets: list[str]):
+                def _find_col_ci_local(df: pd.DataFrame, targets: list[str]):
                     cols_map = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in df.columns}
                     for t in targets:
                         key = re.sub(r"[^a-z0-9]", "", t.lower())
@@ -516,9 +696,9 @@ def render():
                             return cols_map[key]
                     return None
                 
-                cuenta_col   = _find_col_ci(df_pg, ["Cuenta"])
-                tdate_col    = _find_col_ci(df_pg, ["TransactionDate", "Transaction Date", "TransDate"])
-                tno_col      = _find_col_ci(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
+                cuenta_col   = _find_col_ci_local(df_pg, ["Cuenta"])
+                tdate_col    = _find_col_ci_local(df_pg, ["TransactionDate", "Transaction Date", "TransDate"])
+                tno_col      = _find_col_ci_local(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
                 amount_col_ci = amount_col  # já detectado acima
                 
                 # Converter datas detectadas para dd/mm/aaaa (string) e números para 2 casas
@@ -856,6 +1036,84 @@ def render():
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
+
+            # =========================
+            # 🔄 Plantilla Gastos Atualizada (baseada na Cuenta carregada)
+            # =========================
+            if "aag_plantilla_df" in st.session_state and not st.session_state["aag_plantilla_df"].empty:
+                st.divider()
+                st.subheader("🧹 Plantilla Gastos Atualizada (baseada nesta Cuenta)")
+
+                tol_update = st.number_input(
+                    "Tolerância para comparar saldos (|Plantilla - Cuenta|)",
+                    min_value=0.00,
+                    value=0.01,
+                    step=0.01
+                )
+
+                gen_clicked = st.button("🧩 Gerar Plantilla Gastos Atualizada", type="primary", use_container_width=True)
+                if gen_clicked:
+                    try:
+                        df_pg_base = st.session_state["aag_plantilla_df"].copy()
+                        df_pg_atual, resumo_adj = build_plantilla_atualizada_com_cuenta(df_pg_base, df, tol=tol_update)
+
+                        # Guarda na sessão
+                        st.session_state["aag_plantilla_atualizada_df"] = df_pg_atual
+
+                        # Feedback + preview
+                        st.success("Plantilla de Gastos atualizada com sucesso para a conta carregada.")
+                        st.caption("Resumo das chaves comparadas (apenas desta CTA):")
+                        st.dataframe(
+                            resumo_adj,
+                            use_container_width=True,
+                            height=300,
+                            column_config={
+                                "soma_cu": st.column_config.NumberColumn(format="%.2f"),
+                                "soma_pg": st.column_config.NumberColumn(format="%.2f"),
+                                "dif": st.column_config.NumberColumn(format="%.2f"),
+                            }
+                        )
+
+                        # Detecta colunas de data na Plantilla para exportação
+                        amount_col_exp = _find_col_ci(df_pg_atual, ["Amount"])
+                        # tenta recuperar as colunas de data que usamos
+                        date_cols_exp = []
+                        for cand in ["TransactionDate", "Transaction Date", "TransDate", "Due_Date", "Invoice_Date", "DueDate", "InvoiceDate"]:
+                            c_real = _find_col_ci(df_pg_atual, [cand])
+                            if c_real is not None:
+                                date_cols_exp.append(c_real)
+                        date_cols_exp = list(dict.fromkeys(date_cols_exp))  # únicos, mantendo ordem
+
+                        st.subheader("⬇️ Baixar Plantilla Gastos Atualizada")
+                        col_u1, col_u2 = st.columns(2)
+                        with col_u1:
+                            st.download_button(
+                                "Baixar CSV (Plantilla Atualizada)",
+                                df_pg_atual.to_csv(index=False).encode("utf-8"),
+                                "plantilla_gastos_atualizada.csv",
+                                "text/csv",
+                                use_container_width=True
+                            )
+                        with col_u2:
+                            xlsx_upd = to_xlsx_bytes_format(
+                                df_pg_atual,
+                                sheet_name="PlantillaAtualizada",
+                                numeric_cols=[amount_col_exp] if amount_col_exp else [],
+                                date_cols=date_cols_exp
+                            )
+                            st.download_button(
+                                "Baixar XLSX (Plantilla Atualizada)",
+                                xlsx_upd,
+                                "plantilla_gastos_atualizada.xlsx",
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True
+                            )
+
+                    except Exception as e:
+                        st.error("Falha ao gerar Plantilla Gastos Atualizada.")
+                        st.exception(e)
+            else:
+                st.info("Carregue também a **Plantilla de Gastos** para habilitar a atualização.")
 
     else:
         st.info("Selecione um modo acima para continuar.")
