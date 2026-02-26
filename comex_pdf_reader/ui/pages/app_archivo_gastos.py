@@ -1,10 +1,4 @@
 # ui/pages/app_archivo_gastos.py
-# -----------------------------------------------------------------------------
-# Aplicación Archivo Gastos — Unificado
-# Inclui: Estado de Cuenta (.txt), Plantilla de Gastos (.xlsx/.xls),
-# Analise (comparação) e Cuenta GL0061 (parser colunas fixas).
-# -----------------------------------------------------------------------------
-
 import re
 import numpy as np
 import streamlit as st
@@ -13,14 +7,15 @@ from io import BytesIO
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Font
 
-# =============================================================================
+# -----------------------------------------------------------------------------
 # Estado e helpers
-# =============================================================================
+# -----------------------------------------------------------------------------
 def _ensure_state():
     """
     Garante que todas as chaves necessárias existam em st.session_state,
-    e configura o modo default.
+    mesmo se já houver um dicionário 'aag_state' antigo/incompleto na sessão.
     """
+    # Cria o dicionário de estado principal se não existir
     if "aag_state" not in st.session_state or not isinstance(st.session_state["aag_state"], dict):
         st.session_state["aag_state"] = {}
     aag = st.session_state["aag_state"]
@@ -28,9 +23,8 @@ def _ensure_state():
     # Keys dos uploaders separadas por modo (evita conflito de cache do Streamlit)
     aag.setdefault("uploader_key_estado", "aag_estado_upl_1")
     aag.setdefault("uploader_key_pg", "aag_pg_upl_1")
-    aag.setdefault("uploader_key_cuenta", "aag_cuenta_upl_1")
 
-    # Última ação (reserva para futuro uso)
+    # Última ação (reserva)
     aag.setdefault("last_action", None)
 
     # Modo atual da página
@@ -40,9 +34,9 @@ def _ensure_state():
 def _set_mode(mode: str):
     st.session_state["aag_mode"] = mode
 
-# =============================================================================
+# -----------------------------------------------------------------------------
 # Parsers - ESTADO DE CUENTA (.txt)
-# =============================================================================
+# -----------------------------------------------------------------------------
 _NUM = r"(\-?\d[\d,]*\.\d{2}\-?)"  # número com milhares e 2 decimais; pode terminar com '-' (negativo)
 
 def _clean_num(s: str) -> float | None:
@@ -114,95 +108,9 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
         df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
-# =============================================================================
-# PARSER GL0061 — versión final (colunas fixas)
-# =============================================================================
-def parse_cuenta_gl(texto: str) -> pd.DataFrame:
-    """
-    Parser para arquivos GL0061 (colunas fixas em linha), com:
-    CTA | CC | PROD | CNT | TDW | Fecha | Transacción | Debe | Haber | Saldo Real | Saldo | Texto
-    """
-    linhas = texto.splitlines()
-    dados = []
-
-    # Encontrar CTA no cabeçalho
-    cta_header = None
-    reg_header = re.compile(r"Nº de cta\.\s+(\d{6})")
-    for ln in linhas[:50]:
-        m = reg_header.search(ln)
-        if m:
-            cta_header = m.group(1)
-            break
-    if not cta_header:
-        raise ValueError("CTA não encontrada no cabeçalho do arquivo GL0061.")
-
-    def clean_num(v: str | None) -> float:
-        if not v:
-            return 0.0
-        # remove separador de milhares ',' e converte
-        return float(v.replace(",", ""))
-
-    ignore = re.compile(
-        r"Electrolux|Planificación|Moneda|Scala|^-{3,}|^={3,}|"
-        r"Saldo Inicial|Saldo final|T O T A L|ACTIVO|Página|Criterios|CUENTAS POR"
-    )
-
-    # Define colunas uma única vez (evita NameError caso sem linhas válidas)
-    cols = [
-        "CTA","CC","PROD","CNT","TDW",
-        "Fecha","Transacción",
-        "Debe","Haber",
-        "Saldo Real","Saldo",
-        "Texto"
-    ]
-
-    for ln in linhas:
-        if ignore.search(ln):
-            continue
-        if len(ln.strip()) == 0:
-            continue
-        if not re.search(r"\d{2}/\d{2}/\d{2}", ln):
-            continue
-
-        # Campos fixos por offsets (ajuste conforme seu layout final, se necessário)
-        cc     = ln[0:5].strip()
-        prod   = ln[5:13].strip()
-        cnt    = ln[13:23].strip()
-        tdw    = ln[23:31].strip()
-        fecha  = ln[31:40].strip()
-        ntran  = ln[40:50].strip()
-
-        # Pegar últimos 3 números da linha = Debe, Haber, Saldo (impressos)
-        nums = re.findall(r"[-\d,]+\.\d{2}", ln)
-        if len(nums) < 3:
-            continue
-
-        debe  = clean_num(nums[-3])
-        haber = clean_num(nums[-2])
-        saldo_impresso = clean_num(nums[-1])
-
-        # Saldo Real (cálculo Debe - Haber)
-        saldo_real = round(debe - haber, 2)
-
-        # Texto é tudo depois do saldo impresso
-        texto_pos = ln.rfind(nums[-1])
-        texto = ln[texto_pos + len(nums[-1]):].strip() if texto_pos != -1 else ""
-
-        if not cc.isdigit():
-            cc = ""
-
-        dados.append([
-            cta_header, cc, prod, cnt, tdw,
-            fecha, ntran, debe, haber,
-            saldo_real, saldo_impresso,
-            texto
-        ])
-
-    return pd.DataFrame(dados, columns=cols)
-
-# =============================================================================
+# -----------------------------------------------------------------------------
 # Export XLSX com máscara numérica #,##0.00 (mantém tipo numérico)
-# =============================================================================
+# -----------------------------------------------------------------------------
 def to_xlsx_bytes_numformat(df: pd.DataFrame, sheet_name: str, numeric_cols: list[str]) -> bytes:
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -242,15 +150,15 @@ def to_xlsx_bytes_numformat(df: pd.DataFrame, sheet_name: str, numeric_cols: lis
     buffer.seek(0)
     return buffer.getvalue()
 
-# =============================================================================
+# -----------------------------------------------------------------------------
 # Página
-# =============================================================================
+# -----------------------------------------------------------------------------
 def render():
     _ensure_state()
     st.subheader("Aplicación Archivo Gastos")
 
-    # Botões principais (4 modos)
-    col_b1, col_b2, col_b3, col_b4 = st.columns(4)
+    # Botões principais
+    col_b1, col_b2, col_b3 = st.columns(3)
     with col_b1:
         if st.button("Estado de Cuenta", use_container_width=True):
             _set_mode("estado")
@@ -260,9 +168,6 @@ def render():
     with col_b3:
         if st.button("Analise", use_container_width=True):
             _set_mode("asientos")
-    with col_b4:
-        if st.button("Cuenta", use_container_width=True):
-            _set_mode("cuenta")
 
     mode = st.session_state["aag_mode"]
     st.divider()
@@ -481,7 +386,7 @@ def render():
             )
             return
 
-        # Parâmetros
+        # Parâmetros (rótulo atualizado)
         tol = st.number_input("Valor de Tolerância", min_value=0.00, value=0.01, step=0.01)
 
         # Helpers
@@ -567,13 +472,13 @@ def render():
             # Flag só para filtro (não exibida)
             df_cmp["_div"] = df_cmp["Diferença"].abs() > float(tol)
 
-            # Ordenação por número da conta (ordem numérica crescente)
+            # ✅ Ordenação pedida: do menor para o maior por Cuenta (ordem numérica)
             df_cmp["_cuenta_num"] = pd.to_numeric(df_cmp["Cuenta"], errors="coerce")
             df_cmp = df_cmp.sort_values(by="_cuenta_num", ascending=True).drop(columns=["_cuenta_num"]).reset_index(drop=True)
 
             pbar.progress(90, text="Preparando visualização...")
 
-            # Métricas
+            # Métricas (rótulos atualizados)
             c1, c2, c3 = st.columns(3)
             with c1:
                 st.metric("Contas (Estado)", f"{df_ec_agg['Cuenta'].nunique():,}".replace(",", "."))
@@ -636,66 +541,3 @@ def render():
         except Exception as e:
             st.error("Erro durante a comparação.")
             st.exception(e)
-
-    # -------------------------------------------------------------------------
-    # Modo: Cuenta (GL0061)
-    # -------------------------------------------------------------------------
-    elif mode == "cuenta":
-        st.subheader("📘 Importar Archivo de Cuenta (GL0061)")
-
-        upl_key = st.session_state["aag_state"].setdefault("uploader_key_cuenta", "aag_cuenta_upl_1")
-        uploaded = st.file_uploader("Selecionar arquivo GL0061 (.txt)", type=["txt"], key=upl_key)
-
-        col_r, col_c = st.columns([2,1])
-        with col_r:
-            run_clicked = st.button("▶️ Processar Cuenta", type="primary", use_container_width=True, disabled=(uploaded is None))
-        with col_c:
-            clear_clicked = st.button("Limpar", use_container_width=True)
-
-        if clear_clicked:
-            st.session_state["aag_state"]["uploader_key_cuenta"] = upl_key + "_x"
-            if "aag_cuenta_df" in st.session_state:
-                del st.session_state["aag_cuenta_df"]
-            st.rerun()
-
-        if run_clicked and uploaded is not None:
-            raw = uploaded.getvalue()
-            try:
-                text = raw.decode("utf-8")
-            except Exception:
-                text = raw.decode("latin-1")
-
-            try:
-                df = parse_cuenta_gl(text)
-            except Exception as e:
-                st.error("Erro ao interpretar o arquivo GL0061.")
-                st.exception(e)
-                return
-
-            if df.empty:
-                st.error("Nenhuma linha reconhecida no arquivo GL0061.")
-                return
-
-            st.session_state["aag_cuenta_df"] = df.copy()
-            st.dataframe(df, use_container_width=True, height=600)
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.download_button(
-                    "Baixar CSV",
-                    df.to_csv(index=False).encode("utf-8"),
-                    "cuenta.csv",
-                    "text/csv",
-                    use_container_width=True
-                )
-            with col2:
-                xlsx_bytes = to_xlsx_bytes_numformat(df, "Cuenta", ["Debe","Haber","Saldo Real","Saldo"])
-                st.download_button(
-                    "Baixar XLSX",
-                    xlsx_bytes,
-                    "cuenta.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
-    else:
-        st.info("Selecione um modo acima para continuar.")
