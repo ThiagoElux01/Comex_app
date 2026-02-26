@@ -35,6 +35,31 @@ def _ensure_state():
 def _set_mode(mode: str):
     st.session_state["aag_mode"] = mode
 
+# ==== Helpers de formatação para 'Chave' ====
+def _fmt_date_ddmmyyyy(value) -> str:
+    """Converte vários tipos de data para 'dd/mm/aaaa' como string."""
+    if pd.isna(value):
+        return ""
+    try:
+        # já pode vir como datetime.date, datetime64, string, etc.
+        dt = pd.to_datetime(value, dayfirst=True, errors="coerce")
+        if pd.isna(dt):
+            return ""
+        return dt.strftime("%d/%m/%Y")
+    except Exception:
+        return ""
+
+def _fmt_num_2dec_point(value) -> str:
+    """Formata número com 2 casas, ponto como decimal, sem milhares (ex.: 1234.50)."""
+    try:
+        f = float(value)
+        return f"{f:.2f}"
+    except Exception:
+        return ""
+
+def _str_or_empty(x) -> str:
+    return "" if x is None or (isinstance(x, float) and np.isnan(x)) else str(x).strip()
+    
 # -----------------------------------------------------------------------------
 # Parsers - ESTADO DE CUENTA (.txt)
 # -----------------------------------------------------------------------------
@@ -481,7 +506,36 @@ def render():
                 # Garante tipo numérico em Amount
                 df_pg[amount_col] = pd.to_numeric(df_pg[amount_col], errors="coerce")
 
-                # Salva o DF para uso na aba Analise
+                # === Criar coluna 'Chave' na Plantilla de Gastos ===
+                # Detecta campos necessários (case-insensitive, tolerando variações)
+                def _find_col_ci(df: pd.DataFrame, targets: list[str]):
+                    cols_map = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in df.columns}
+                    for t in targets:
+                        key = re.sub(r"[^a-z0-9]", "", t.lower())
+                        if key in cols_map:
+                            return cols_map[key]
+                    return None
+                
+                cuenta_col   = _find_col_ci(df_pg, ["Cuenta"])
+                tdate_col    = _find_col_ci(df_pg, ["TransactionDate", "Transaction Date", "TransDate"])
+                tno_col      = _find_col_ci(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
+                amount_col_ci = amount_col  # já detectado acima
+                
+                # Converter datas detectadas para dd/mm/aaaa (string) e números para 2 casas
+                tdate_str = df_pg[tdate_col].apply(_fmt_date_ddmmyyyy) if tdate_col else ""
+                tno_str   = df_pg[tno_col].apply(_str_or_empty) if tno_col else ""
+                cuenta_str= df_pg[cuenta_col].apply(_str_or_empty) if cuenta_col else ""
+                amount_str= df_pg[amount_col_ci].apply(_fmt_num_2dec_point) if amount_col_ci else ""
+                
+                # Concatena com pipe
+                df_pg["Chave"] = (
+                    (cuenta_str if isinstance(cuenta_str, pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
+                    (tdate_str  if isinstance(tdate_str,  pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
+                    (tno_str    if isinstance(tno_str,    pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
+                    (amount_str if isinstance(amount_str, pd.Series) else pd.Series([""]*len(df_pg)))
+                )
+                
+                # Salva o DF para uso na aba Analise (agora com 'Chave')
                 st.session_state["aag_plantilla_df"] = df_pg.copy()
 
                 pbar.progress(70, text="Preparando visualização...")
@@ -751,6 +805,15 @@ def render():
                 st.error("Nenhuma linha reconhecida no arquivo GL0061.")
                 return
 
+            # Campos: CTA, Fecha, Transacción, Saldo Real
+            cta_str   = df["CTA"].apply(_str_or_empty) if "CTA" in df.columns else pd.Series([""]*len(df))
+            fecha_str = df["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df.columns else pd.Series([""]*len(df))
+            tran_str  = df["Transacción"].apply(_str_or_empty) if "Transacción" in df.columns else pd.Series([""]*len(df))
+            sreal_str = df["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df.columns else pd.Series([""]*len(df))
+            
+            df["Chave"] = cta_str + "|" + fecha_str + "|" + tran_str + "|" + sreal_str
+            
+            # Salva com 'Chave'
             st.session_state["aag_cuenta_df"] = df.copy()
 
             # Colunas de data para exibição (Fecha e/ou Fechado)
