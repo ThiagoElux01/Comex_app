@@ -134,6 +134,48 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
         df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
+    # ==== Helpers globais extras ====
+    def _norm_conta(x) -> str:
+        """Normaliza o número da conta: só dígitos e remove zeros à esquerda."""
+        s = re.sub(r"\D", "", str(x))
+        s = s.lstrip("0")
+        return s if s else ""
+    
+    def _split_chave(ch: str):
+        """
+        Divide 'Chave' no formato esperado:
+            Plantilla: Cuenta|TransactionDate|TransactionNo|Amount
+            Cuenta(GL0061): CTA|Fecha|Transacción|Saldo Real
+        Retorna: (cuenta_str, date(date|None), trans_str, amount(float|None))
+        """
+        parts = (str(ch) if ch is not None else "").split("|")
+        while len(parts) < 4:
+            parts.append("")
+        cuenta_str = parts[0].strip()
+    
+        date_str = parts[1].strip()
+        date_val = pd.to_datetime(date_str, errors="coerce", dayfirst=True)
+        date_val = date_val.date() if pd.notna(date_val) else None
+    
+        trans_str = parts[2].strip()
+        amount_str = parts[3].strip()
+        amount_val = _clean_num(amount_str)
+    
+        return cuenta_str, date_val, trans_str, amount_val
+    
+    def _find_col_ci_generic(df: pd.DataFrame, targets: list[str]):
+        """
+        Busca coluna por nome, ignorando maiúsc./minúsc. e sinais. Retorna o primeiro match.
+        """
+        if df is None or df.empty:
+            return None
+        mm = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in df.columns}
+        for t in targets:
+            k = re.sub(r"[^a-z0-9]", "", t.lower())
+            if k in mm:
+                return mm[k]
+        return None
+
 # -----------------------------------------------------------------------------
 # PARSER GL0061 — colunas fixas
 # -----------------------------------------------------------------------------
@@ -226,6 +268,203 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
 
     return df
 
+# ----------------------------------------------------------------------
+# Limpeza da Plantilla de Gastos orientada pela Cuenta (GL0061)
+# ----------------------------------------------------------------------
+def _ensure_pg_chave(df_pg: pd.DataFrame) -> pd.DataFrame:
+    """
+    Garante a coluna 'Chave' na Plantilla (se não existir, tenta criar).
+    Usa as mesmas regras da aba Plantilla.
+    """
+    if df_pg is None or df_pg.empty:
+        return df_pg
+
+    if "Chave" in df_pg.columns:
+        return df_pg
+
+    # Detecta colunas relevantes
+    cuenta_col = _find_col_ci_generic(df_pg, ["Cuenta"])
+    amount_col = _find_col_ci_generic(df_pg, ["Amount"])
+    tdate_col  = _find_col_ci_generic(df_pg, ["TransactionDate", "Transaction Date", "TransDate"])
+    tno_col    = _find_col_ci_generic(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
+
+    # Se não existir Amount ou Cuenta, não há como formar a Chave
+    if amount_col is None or cuenta_col is None:
+        return df_pg
+
+    # Formata componentes
+    tdate_str   = df_pg[tdate_col].apply(_fmt_date_ddmmyyyy) if tdate_col else pd.Series([""] * len(df_pg))
+    tno_str     = df_pg[tno_col].apply(_str_or_empty) if tno_col else pd.Series([""] * len(df_pg))
+    cuenta_str  = df_pg[cuenta_col].apply(_str_or_empty)
+    df_pg[amount_col] = pd.to_numeric(df_pg[amount_col], errors="coerce")
+    amount_str  = df_pg[amount_col].apply(_fmt_num_2dec_point)
+
+    df_pg["Chave"] = cuenta_str + "|" + tdate_str + "|" + tno_str + "|" + amount_str
+    return df_pg
+
+
+def _build_pg_rows_from_cuenta(df_cuenta_cta: pd.DataFrame,
+                               pg_columns: list[str],
+                               cuenta_col: str | None,
+                               amount_col: str | None,
+                               tdate_col: str | None,
+                               tno_col: str | None) -> pd.DataFrame:
+    """
+    Cria linhas de Plantilla a partir das linhas de Cuenta (1‑para‑1 com a 'Chave' de Cuenta).
+    Mantém todas as colunas da Plantilla (preenche desconhecidas com None).
+    """
+    rows = []
+    for _, r in df_cuenta_cta.iterrows():
+        chave = r.get("Chave", "")
+        cta_str, fdate, trans, amt = _split_chave(chave)
+
+        new_row = {c: None for c in pg_columns}
+        if "Chave" in pg_columns:
+            new_row["Chave"] = chave
+        if cuenta_col:
+            new_row[cuenta_col] = cta_str
+        if amount_col:
+            new_row[amount_col] = float(amt) if amt is not None else None
+        if tdate_col:
+            new_row[tdate_col] = fdate
+        if tno_col:
+            new_row[tno_col] = trans
+
+        rows.append(new_row)
+
+    return pd.DataFrame(rows, columns=pg_columns)
+
+
+    def clean_plantilla_by_cuenta(df_cuenta: pd.DataFrame,
+                                  df_pg: pd.DataFrame,
+                                  tol: float = 0.0,
+                                  only_problem_keys: bool = True):
+        """
+        Limpa a Plantilla de Gastos (apenas da CTA carregada em Cuenta), usando as chaves da Cuenta como referência.
+    
+        Regra:
+          - Calcula (por Chave) soma e contagem em Cuenta (Saldo Real) e Plantilla (Amount).
+          - Se |dif| <= tol e contagens iguais -> mantém Plantilla como está para essa Chave.
+          - Caso contrário -> reconstrói as linhas dessa Chave na Plantilla com base nas linhas da Cuenta
+            (mesmo número de linhas e mesma Chave; consequentemente, Amount segue o Saldo Real).
+    
+        Parâmetros
+          df_cuenta          : DataFrame retornado do GL0061 (com 'Chave', 'CTA', 'Saldo Real', 'Fecha', 'Transacción')
+          df_pg              : DataFrame atual da Plantilla (de preferência o já carregado na aba Plantilla)
+          tol                : tolerância de diferença absoluta entre somas (default 0.00)
+          only_problem_keys  : True -> reconstrói apenas chaves com divergência (ou contagem diferente)
+                               False -> reconstrói TODAS as chaves da CTA carregada (modo “forçar total”)
+    
+        Retorna
+          (df_pg_clean, resumo_dict)
+        """
+        if df_cuenta is None or df_cuenta.empty:
+            raise ValueError("Cuenta (GL0061) inexistente ou vazia.")
+        if df_pg is None or df_pg.empty:
+            raise ValueError("Plantilla de Gastos inexistente ou vazia.")
+    
+        if "CTA" not in df_cuenta.columns or "Chave" not in df_cuenta.columns:
+            raise ValueError("Cuenta precisa conter as colunas 'CTA' e 'Chave'.")
+        # Pega a CTA do arquivo (GL0061 é por conta)
+        cta_raw = str(df_cuenta["CTA"].dropna().astype(str).iloc[0])
+        cta_norm = _norm_conta(cta_raw)
+    
+        # Garante 'Chave' na Plantilla
+        df_pg = _ensure_pg_chave(df_pg.copy())
+    
+        # Detecta colunas pivot da Plantilla
+        cuenta_col = _find_col_ci_generic(df_pg, ["Cuenta"])
+        amount_col = _find_col_ci_generic(df_pg, ["Amount"])
+        tdate_col  = _find_col_ci_generic(df_pg, ["TransactionDate", "Transaction Date", "TransDate"])
+        tno_col    = _find_col_ci_generic(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
+    
+        if cuenta_col is None or amount_col is None:
+            raise ValueError("Plantilla precisa conter as colunas 'Cuenta' e 'Amount'.")
+    
+        # Normaliza CTA na Plantilla (a partir da própria 'Chave' para garantir coerência)
+        if "Chave" in df_pg.columns:
+            pg_cuenta = df_pg["Chave"].astype(str).str.split("|").str[0]
+        else:
+            pg_cuenta = df_pg[cuenta_col].astype(str)
+        df_pg["__cta_norm__"] = pg_cuenta.apply(_norm_conta)
+    
+        # Filtra somente a CTA carregada
+        df_pg_cta = df_pg[df_pg["__cta_norm__"] == cta_norm].copy()
+        df_pg_others = df_pg[df_pg["__cta_norm__"] != cta_norm].copy()
+    
+        # --- Stats por Chave ---
+        # Cuenta
+        df_cuenta_cta = df_cuenta.copy()
+        df_cuenta_cta["__cta_norm__"] = df_cuenta_cta["CTA"].apply(_norm_conta)
+        df_cuenta_cta = df_cuenta_cta[df_cuenta_cta["__cta_norm__"] == cta_norm]
+        if df_cuenta_cta.empty:
+            raise ValueError("A CTA do arquivo Cuenta não foi identificada nas linhas lidas.")
+    
+        if "Saldo Real" not in df_cuenta_cta.columns:
+            raise ValueError("Cuenta deve conter a coluna 'Saldo Real'.")
+    
+        grp_cuenta = df_cuenta_cta.groupby("Chave", as_index=False).agg(
+            cnt_cuenta=("Chave", "size"),
+            sum_cuenta=("Saldo Real", "sum")
+        )
+    
+        # Plantilla
+        df_pg_cta[amount_col] = pd.to_numeric(df_pg_cta[amount_col], errors="coerce").fillna(0.0)
+        grp_pg = df_pg_cta.groupby("Chave", as_index=False).agg(
+            cnt_pg=("Chave", "size"),
+            sum_pg=(amount_col, "sum")
+        )
+    
+        # Merge e definição de chaves problemáticas
+        cmp_keys = pd.merge(grp_cuenta, grp_pg, on="Chave", how="outer")
+        cmp_keys["cnt_cuenta"] = pd.to_numeric(cmp_keys["cnt_cuenta"], errors="coerce").fillna(0).astype(int)
+        cmp_keys["cnt_pg"]     = pd.to_numeric(cmp_keys["cnt_pg"], errors="coerce").fillna(0).astype(int)
+        cmp_keys["sum_cuenta"] = pd.to_numeric(cmp_keys["sum_cuenta"], errors="coerce").fillna(0.0)
+        cmp_keys["sum_pg"]     = pd.to_numeric(cmp_keys["sum_pg"], errors="coerce").fillna(0.0)
+        cmp_keys["abs_diff"]   = (cmp_keys["sum_pg"] - cmp_keys["sum_cuenta"]).abs()
+    
+        # Chaves presentes apenas em Cuenta ou com diferença de soma ou contagem diferente são "problemáticas"
+        prob_mask = (cmp_keys["abs_diff"] > float(tol)) | (cmp_keys["cnt_cuenta"] != cmp_keys["cnt_pg"]) | cmp_keys["sum_pg"].isna()
+        if only_problem_keys:
+            keys_to_fix = set(cmp_keys.loc[prob_mask, "Chave"].dropna().astype(str))
+        else:
+            keys_to_fix = set(cmp_keys["Chave"].dropna().astype(str))
+    
+        # --- Reconstrução ---
+        # a) Mantém linhas da Plantilla da CTA que NÃO precisam de ajuste
+        keep_mask = ~df_pg_cta["Chave"].astype(str).isin(keys_to_fix)
+        df_pg_keep = df_pg_cta[keep_mask].copy()
+    
+        # b) Constrói linhas novas a partir da Cuenta para as chaves que precisam de ajuste
+        if keys_to_fix:
+            df_cuenta_fix = df_cuenta_cta[df_cuenta_cta["Chave"].astype(str).isin(keys_to_fix)].copy()
+            df_pg_new = _build_pg_rows_from_cuenta(
+                df_cuenta_fix,
+                pg_columns=list(df_pg.columns),  # preserva estrutura/ordem
+                conta_col=cuenta_col if (cuenta_col in df_pg.columns) else None,
+                amount_col=amount_col if (amount_col in df_pg.columns) else None,
+                tdate_col=tdate_col if (tdate_col in df_pg.columns) else None,
+                tno_col=tno_col if (tno_col in df_pg.columns) else None,
+            )
+        else:
+            df_pg_new = df_pg_keep.iloc[0:0].copy()
+    
+        # c) Recompõe Plantilla: outros CTAs + (CTA corrente: keep + new)
+        df_pg_clean = pd.concat([df_pg_others, df_pg_keep, df_pg_new], ignore_index=True)
+        if "__cta_norm__" in df_pg_clean.columns:
+            df_pg_clean = df_pg_clean.drop(columns=["__cta_norm__"])
+    
+        # Resumo
+        resumo = {
+            "cta": cta_norm,
+            "total_pg_cta_antes": int(len(df_pg_cta)),
+            "total_pg_cta_depois": int(len(df_pg_keep) + len(df_pg_new)),
+            "chaves_total_cta": int(cmp_keys["Chave"].notna().sum()),
+            "chaves_ajustadas": int(len(keys_to_fix)),
+            "tol": float(tol),
+            "only_problem_keys": bool(only_problem_keys),
+        }
+        return df_pg_clean, resumo
 # -----------------------------------------------------------------------------
 # Export XLSX com máscara numérica e data
 # -----------------------------------------------------------------------------
@@ -856,6 +1095,90 @@ def render():
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
+            # ============================================================
+            # Limpeza da Plantilla com base na Cuenta carregada (CTA atual)
+            # ============================================================
+            st.markdown("---")
+            st.subheader("🧹 Limpar Plantilla de Gastos (somente CTA do arquivo carregado)")
+            if "aag_plantilla_df" not in st.session_state or st.session_state["aag_plantilla_df"] is None:
+                st.info("Carregue primeiro a **Plantilla de Gastos** na aba correspondente para habilitar esta função.")
+            else:
+                df_pg_atual = st.session_state["aag_plantilla_df"]
+                with st.expander("Opções de processamento", expanded=True):
+                    tol_pg = st.number_input("Tolerância para aceitar a soma por 'Chave' (em valor absoluto)", min_value=0.00, value=0.00, step=0.01)
+                    only_prob = st.checkbox("Reconstruir apenas chaves com divergência (recomendado)", value=True)
+                    force_all = st.checkbox("Forçar reconstrução **total** da CTA (substitui todas as chaves desta CTA)", value=False)
+                    if force_all:
+                        only_prob = False
+                col_a, col_b = st.columns([2, 1])
+                with col_a:
+                    do_clean = st.button("🔧 Executar limpeza da Plantilla para a CTA atual", type="primary", use_container_width=True)
+                with col_b:
+                    replace_session = st.checkbox("Substituir Plantilla em memória pela versão limpa", value=False)
+
+                if do_clean:
+                    try:
+                        df_pg_clean, resumo = clean_plantilla_by_cuenta(
+                            df_cuenta=df,
+                            df_pg=df_pg_atual,
+                            tol=tol_pg,
+                            only_problem_keys=only_prob
+                        )
+
+                        st.success("Plantilla limpa gerada com sucesso.")
+                        st.write("**Resumo da CTA processada:**")
+                        c1, c2, c3 = st.columns(3)
+                        with c1:
+                            st.metric("CTA (normalizada)", resumo["cta"])
+                        with c2:
+                            st.metric("Linhas antes (Plantilla, CTA)", resumo["total_pg_cta_antes"])
+                        with c3:
+                            st.metric("Linhas depois (Plantilla, CTA)", resumo["total_pg_cta_depois"])
+                        c4, c5 = st.columns(2)
+                        with c4:
+                            st.metric("Chaves (CTA)", resumo["chaves_total_cta"])
+                        with c5:
+                            st.metric("Chaves ajustadas", resumo["chaves_ajustadas"])
+
+                        # Prévia
+                        st.dataframe(
+                            df_pg_clean.head(100),
+                            use_container_width=True,
+                            height=400,
+                        )
+
+                        # Downloads
+                        col_d1, col_d2 = st.columns(2)
+                        with col_d1:
+                            st.download_button(
+                                "Baixar CSV (Plantilla LIMPA - CTA atual)",
+                                df_pg_clean.to_csv(index=False).encode("utf-8"),
+                                "plantilla_gastos_limpia.csv",
+                                "text/csv",
+                                use_container_width=True
+                            )
+                        with col_d2:
+                            xlsx_bytes_pg = to_xlsx_bytes_format(
+                                df_pg_clean,
+                                sheet_name="PlantillaLIMPA",
+                                numeric_cols=[_find_col_ci_generic(df_pg_clean, ["Amount"]) or "Amount"],
+                                date_cols=[c for c in df_pg_clean.columns if str(c).lower() in {"transactiondate","due_date","invoice_date","invoicedate"}]
+                            )
+                            st.download_button(
+                                "Baixar XLSX (Plantilla LIMPA - CTA atual)",
+                                xlsx_bytes_pg,
+                                "plantilla_gastos_limpia.xlsx",
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True
+                            )
+
+                        # Atualiza sessão se solicitado
+                        if replace_session:
+                            st.session_state["aag_plantilla_df"] = df_pg_clean.copy()
+                            st.info("A Plantilla em memória foi substituída pela versão LIMPA (CTA atual). Agora sua aba Analise refletirá a limpeza.")
+                    except Exception as e:
+                        st.error("Falha ao limpar a Plantilla com base na Cuenta.")
+                        st.exception(e)
 
     else:
         st.info("Selecione um modo acima para continuar.")
