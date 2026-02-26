@@ -72,8 +72,8 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
 
         # Campos fixos no início
         cc     = ln[0:5].strip()
-        prod   = ln[5:14].strip()
-        cnt    = ln[14:23].strip()
+        prod   = ln[5:13].strip()
+        cnt    = ln[13:23].strip()
         tdw    = ln[23:31].strip()
         fecha  = ln[31:40].strip()
         ntran  = ln[40:50].strip()
