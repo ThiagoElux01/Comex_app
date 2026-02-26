@@ -4,7 +4,6 @@ import numpy as np
 import streamlit as st
 import pandas as pd
 from io import BytesIO
-from typing import Optional, List, Tuple
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Font
 
@@ -60,14 +59,16 @@ def _fmt_num_2dec_point(value) -> str:
 
 def _str_or_empty(x) -> str:
     return "" if x is None or (isinstance(x, float) and np.isnan(x)) else str(x).strip()
-
+    
 # -----------------------------------------------------------------------------
 # Parsers - ESTADO DE CUENTA (.txt)
 # -----------------------------------------------------------------------------
 _NUM = r"(\-?\d[\d,]*\.\d{2}\-?)"  # número com milhares e 2 decimais; pode terminar com '-' (negativo)
 
-def _clean_num(s: str) -> Optional[float]:
-    """Converte strings como '12,345.67-' em float (negativo)."""
+def _clean_num(s: str) -> float | None:
+    """
+    Converte strings como '12,345.67-' em float (negativo).
+    """
     if s is None:
         return None
     s = str(s).strip()
@@ -155,7 +156,7 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     if not cta_header:
         raise ValueError("CTA não encontrada no cabeçalho do arquivo GL0061.")
 
-    def clean_num(v: Optional[str]) -> float:
+    def clean_num(v: str | None) -> float:
         if not v:
             return 0.0
         return float(v.replace(",", ""))
@@ -217,7 +218,8 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
 
     df = pd.DataFrame(dados, columns=cols)
 
-    # Ajuste de data
+    # === Ajuste de data no dataframe de cuentas ===
+    # Se houver coluna 'Fechado' (alguns dumps usam esse nome), trata também.
     for date_col in ["Fecha", "Fechado"]:
         if date_col in df.columns:
             df[date_col] = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True).dt.date
@@ -230,8 +232,8 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
 def to_xlsx_bytes_format(
     df: pd.DataFrame,
     sheet_name: str,
-    numeric_cols: Optional[List[str]] = None,
-    date_cols: Optional[List[str]] = None
+    numeric_cols: list[str] | None = None,
+    date_cols: list[str] | None = None
 ) -> bytes:
     """
     Exporta para XLSX aplicando:
@@ -247,6 +249,7 @@ def to_xlsx_bytes_format(
         df_to_save = df.copy()
         for dc in date_cols:
             if dc in df_to_save.columns:
+                # Se a coluna está como datetime.date, converte para datetime64
                 df_to_save[dc] = pd.to_datetime(df_to_save[dc], errors="coerce")
 
         df_to_save.to_excel(writer, index=False, sheet_name=sheet_name)
@@ -278,6 +281,7 @@ def to_xlsx_bytes_format(
             col_idx = df_to_save.columns.get_loc(col_name) + 1
             for row in range(2, ws.max_row + 1):
                 cell = ws.cell(row=row, column=col_idx)
+                # openpyxl trata datetime como Python datetime; só aplicar formato
                 if cell.value:
                     cell.number_format = 'dd/mm/yyyy'
 
@@ -297,133 +301,6 @@ def to_xlsx_bytes_format(
 
     buffer.seek(0)
     return buffer.getvalue()
-
-# -----------------------------------------------------------------------------
-# ==== HELPERS para atualização da Plantilla com base em Cuenta ====
-# -----------------------------------------------------------------------------
-def _find_col_ci(df: pd.DataFrame, targets: List[str]) -> Optional[str]:
-    """Busca uma coluna no DF ignorando maiúsculas/minúsculas e caracteres especiais."""
-    if df is None or df.empty:
-        return None
-    cols_map = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in df.columns}
-    for t in targets:
-        key = re.sub(r"[^a-z0-9]", "", t.lower())
-        if key in cols_map:
-            return cols_map[key]
-    return None
-
-def build_plantilla_atualizada_com_cuenta(
-    df_pg: pd.DataFrame,
-    df_cu: pd.DataFrame,
-    tol: float = 0.01
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Retorna (df_pg_atualizada, df_resumo).
-    - Ajusta somente as chaves da CTA carregada (chaves que começam com 'CTA|').
-    - Para chaves sem diferença de saldo (|sum_pg - sum_cu| <= tol): mantém como está.
-    - Para chaves com diferença: recria o bloco na Plantilla espelhando a contagem e valores do GL (Cuenta).
-    """
-    if df_pg is None or df_pg.empty:
-        raise ValueError("Plantilla de Gastos não carregada.")
-    if df_cu is None or df_cu.empty:
-        raise ValueError("Cuenta (GL0061) não carregada.")
-    if "Chave" not in df_pg.columns or "Chave" not in df_cu.columns:
-        raise ValueError("Ambos os dataframes precisam ter a coluna 'Chave'.")
-
-    # Detecta colunas essenciais na Plantilla
-    amount_col = _find_col_ci(df_pg, ["Amount"])
-    cuenta_col = _find_col_ci(df_pg, ["Cuenta"])
-    tdate_col  = _find_col_ci(df_pg, ["TransactionDate", "Transaction Date", "TransDate"])
-    tno_col    = _find_col_ci(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
-    if amount_col is None:
-        raise ValueError("Coluna 'Amount' não encontrada na Plantilla.")
-
-    # CTA do GL0061 (é único no arquivo)
-    cta_loaded = str(df_cu["CTA"].iloc[0]).strip()
-    cta_prefix = f"{cta_loaded}|"
-
-    # Subconjuntos restritos à CTA
-    df_pg_subset = df_pg[df_pg["Chave"].astype(str).str.startswith(cta_prefix)].copy()
-    df_pg_other  = df_pg[~df_pg["Chave"].astype(str).str.startswith(cta_prefix)].copy()
-    df_cu_subset = df_cu[df_cu["Chave"].astype(str).str.startswith(cta_prefix)].copy()
-
-    # Se não houver linhas na Plantilla para esta CTA, usa molde genérico
-    template_base = (df_pg_subset.iloc[0].copy() if not df_pg_subset.empty else pd.Series({c: None for c in df_pg.columns}))
-
-    # Somas e contagens por Chave (Plantilla x Cuenta)
-    df_pg_subset[amount_col] = pd.to_numeric(df_pg_subset[amount_col], errors="coerce").fillna(0.0)
-    g_pg = df_pg_subset.groupby("Chave", as_index=False).agg(soma_pg=(amount_col, "sum"), n_pg=("Chave", "size"))
-
-    if "Saldo Real" not in df_cu_subset.columns:
-        raise ValueError("No GL0061 processado não há a coluna 'Saldo Real'.")
-    df_cu_subset["Saldo Real"] = pd.to_numeric(df_cu_subset["Saldo Real"], errors="coerce").fillna(0.0)
-    g_cu = df_cu_subset.groupby("Chave", as_index=False).agg(soma_cu=("Saldo Real", "sum"), n_cu=("Chave", "size"))
-
-    resumo = pd.merge(g_cu, g_pg, on="Chave", how="outer")
-    resumo["soma_cu"] = pd.to_numeric(resumo["soma_cu"], errors="coerce").fillna(0.0)
-    resumo["soma_pg"] = pd.to_numeric(resumo["soma_pg"], errors="coerce").fillna(0.0)
-    resumo["n_cu"] = pd.to_numeric(resumo["n_cu"], errors="coerce").fillna(0).astype(int)
-    resumo["n_pg"] = pd.to_numeric(resumo["n_pg"], errors="coerce").fillna(0).astype(int)
-    resumo["dif"] = (resumo["soma_pg"] - resumo["soma_cu"]).round(2)
-    resumo["ajustar"] = resumo["dif"].abs() > float(tol)
-
-    # Chaves sem ajuste
-    chaves_ok = set(resumo.loc[~resumo["ajustar"], "Chave"].astype(str).tolist())
-
-    # Mantém as linhas atuais para chaves ok
-    linhas_novas = []
-    if not df_pg_subset.empty:
-        linhas_novas.append(df_pg_subset[df_pg_subset["Chave"].isin(chaves_ok)])
-
-    # Reconstrói chaves com diferença usando as linhas do GL
-    chaves_ajustar = resumo.loc[resumo["ajustar"], "Chave"].astype(str).tolist()
-    molde_por_chave = {}
-    if not df_pg_subset.empty:
-        molde_por_chave = df_pg_subset.groupby("Chave").head(1).set_index("Chave")
-
-    for chave in chaves_ajustar:
-        bloc_cu = df_cu_subset[df_cu_subset["Chave"] == chave]
-        if bloc_cu.empty:
-            continue
-
-        molde = molde_por_chave.loc[chave].copy() if chave in molde_por_chave.index else template_base.copy()
-
-        for _, rc in bloc_cu.iterrows():
-            row = molde.copy()
-
-            if cuenta_col is not None:
-                row[cuenta_col] = rc.get("CTA", None)
-            if tdate_col is not None:
-                row[tdate_col] = rc.get("Fecha", None)
-            if tno_col is not None:
-                row[tno_col] = rc.get("Transacción", None)
-
-            # Amount = Saldo Real do GL
-            row[amount_col] = float(rc.get("Saldo Real", 0.0))
-
-            # Recalcula Chave com mesmo formato do app
-            cta_str   = _str_or_empty(row.get(cuenta_col)) if cuenta_col is not None else _str_or_empty(rc.get("CTA"))
-            tdate_str = _fmt_date_ddmmyyyy(row.get(tdate_col)) if tdate_col is not None else _fmt_date_ddmmyyyy(rc.get("Fecha"))
-            tno_str   = _str_or_empty(row.get(tno_col)) if tno_col is not None else _str_or_empty(rc.get("Transacción"))
-            amt_str   = _fmt_num_2dec_point(row.get(amount_col))
-            row["Chave"] = f"{cta_str}|{tdate_str}|{tno_str}|{amt_str}"
-
-            try:
-                row[amount_col] = float(row[amount_col])
-            except Exception:
-                row[amount_col] = pd.to_numeric(row[amount_col], errors="coerce")
-
-            linhas_novas.append(pd.DataFrame([row.to_dict()]))
-
-    bloco_cta_atualizado = pd.concat(linhas_novas, ignore_index=True) if len(linhas_novas) > 0 else pd.DataFrame(columns=df_pg.columns)
-    df_pg_atualizada = pd.concat([df_pg_other, bloco_cta_atualizado], ignore_index=True)
-
-    # Ordenação amigável se existirem colunas
-    if cuenta_col is not None and tdate_col is not None:
-        df_pg_atualizada = df_pg_atualizada.sort_values(by=[cuenta_col, tdate_col], ascending=[True, True], na_position="last").reset_index(drop=True)
-
-    resumo_view = resumo[["Chave", "soma_cu", "soma_pg", "dif", "n_cu", "n_pg", "ajustar"]].sort_values(by="Chave").reset_index(drop=True)
-    return df_pg_atualizada, resumo_view
 
 # -----------------------------------------------------------------------------
 # Página
@@ -515,7 +392,9 @@ def render():
                     df,
                     use_container_width=True,
                     height=550,
-                    column_config={c: st.column_config.NumberColumn(format="%.2f") for c in numeric_cols if c in df.columns},
+                    column_config={
+                        c: st.column_config.NumberColumn(format="%.2f") for c in numeric_cols if c in df.columns
+                    },
                 )
 
                 pbar.progress(90, text="Gerando arquivos para download...")
@@ -594,11 +473,18 @@ def render():
                     st.error("Coluna 'Amount' não encontrada no arquivo.")
                     return
 
-                # Datas comuns na Plantilla
+                # === Datas na Plantilla: TransactionDate, Due_Date, Invoice_Date ===
+                # normalizador de nomes para encontrar colunas mesmo com variações
                 def norm(s: str) -> str:
                     return re.sub(r"[^a-z0-9]", "", str(s).strip().lower())
 
-                date_targets = {"transactiondate": None, "due_date": None, "invoicedate": None, "invoice_date": None}
+                date_targets = {
+                    "transactiondate": None,
+                    "due_date": None,
+                    "invoicedate": None,
+                    "invoice_date": None,
+                }
+                # Mapear colunas do DF a alvos
                 found_date_cols = []
                 for c in df_pg.columns:
                     nc = norm(c)
@@ -607,89 +493,109 @@ def render():
                     elif nc in ("duedate", "due_date"):
                         date_targets["due_date"] = c
                     elif nc in ("invoicedate", "invoice_date"):
+                        # Prioriza a primeira encontrada
                         if date_targets.get("invoicedate") is None:
                             date_targets["invoicedate"] = c
 
+                # Converte cada coluna encontrada para data (dd/mm/aaaa)
                 for key, col in date_targets.items():
                     if col and col in df_pg.columns:
                         df_pg[col] = pd.to_datetime(df_pg[col], errors="coerce", dayfirst=True).dt.date
                         found_date_cols.append(col)
 
-                # Numérico em Amount
+                # Garante tipo numérico em Amount
                 df_pg[amount_col] = pd.to_numeric(df_pg[amount_col], errors="coerce")
 
-                # Cria 'Chave'
-                def _find_col_ci_local(df: pd.DataFrame, targets: List[str]) -> Optional[str]:
+                # === Criar coluna 'Chave' na Plantilla de Gastos ===
+                # Detecta campos necessários (case-insensitive, tolerando variações)
+                def _find_col_ci(df: pd.DataFrame, targets: list[str]):
                     cols_map = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in df.columns}
                     for t in targets:
                         key = re.sub(r"[^a-z0-9]", "", t.lower())
                         if key in cols_map:
                             return cols_map[key]
                     return None
-
-                cuenta_col   = _find_col_ci_local(df_pg, ["Cuenta"])
-                tdate_col    = _find_col_ci_local(df_pg, ["TransactionDate", "Transaction Date", "TransDate"])
-                tno_col      = _find_col_ci_local(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
-                amount_col_ci = amount_col
-
+                
+                cuenta_col   = _find_col_ci(df_pg, ["Cuenta"])
+                tdate_col    = _find_col_ci(df_pg, ["TransactionDate", "Transaction Date", "TransDate"])
+                tno_col      = _find_col_ci(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
+                amount_col_ci = amount_col  # já detectado acima
+                
+                # Converter datas detectadas para dd/mm/aaaa (string) e números para 2 casas
                 tdate_str = df_pg[tdate_col].apply(_fmt_date_ddmmyyyy) if tdate_col else ""
                 tno_str   = df_pg[tno_col].apply(_str_or_empty) if tno_col else ""
                 cuenta_str= df_pg[cuenta_col].apply(_str_or_empty) if cuenta_col else ""
                 amount_str= df_pg[amount_col_ci].apply(_fmt_num_2dec_point) if amount_col_ci else ""
-
+                
+                # Concatena com pipe
                 df_pg["Chave"] = (
                     (cuenta_str if isinstance(cuenta_str, pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
                     (tdate_str  if isinstance(tdate_str,  pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
                     (tno_str    if isinstance(tno_str,    pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
-                    (amount_str if isinstance(amount_str, pd.Series) else pd.Series([""]*len(df_pg)])
+                    (amount_str if isinstance(amount_str, pd.Series) else pd.Series([""]*len(df_pg)))
                 )
-
+                
+                # Salva o DF para uso na aba Analise (agora com 'Chave')
                 st.session_state["aag_plantilla_df"] = df_pg.copy()
 
                 pbar.progress(70, text="Preparando visualização...")
                 st.success("Arquivo carregado com sucesso.")
 
-                col_cfg = {str(amount_col): st.column_config.NumberColumn(format="%.2f")}
+                # Configuração de colunas para visualização
+                col_cfg = {
+                    str(amount_col): st.column_config.NumberColumn(format="%.2f")
+                }
                 for dc in found_date_cols:
                     col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
 
-                st.dataframe(df_pg, use_container_width=True, height=550, column_config=col_cfg)
+                st.dataframe(
+                    df_pg,
+                    use_container_width=True,
+                    height=550,
+                    column_config=col_cfg,
+                )
 
                 pbar.progress(90, text="Gerando arquivos para download...")
                 col_csv, col_xlsx = st.columns(2)
                 with col_csv:
                     st.download_button(
-                        "Baixar CSV (Plantilla Gastos)",
-                        df_pg.to_csv(index=False).encode("utf-8"),
-                        "plantilla_gastos.csv",
-                        "text/csv",
+                        label="Baixar CSV (Plantilla Gastos)",
+                        data=df_pg.to_csv(index=False).encode("utf-8"),
+                        file_name="plantilla_gastos.csv",
+                        mime="text/csv",
                         use_container_width=True,
                     )
                 with col_xlsx:
                     xlsx_bytes = to_xlsx_bytes_format(
-                        df_pg, sheet_name="PlantillaGastos", numeric_cols=[amount_col], date_cols=found_date_cols
+                        df_pg,
+                        sheet_name="PlantillaGastos",
+                        numeric_cols=[amount_col],
+                        date_cols=found_date_cols,
                     )
                     st.download_button(
-                        "Baixar XLSX (Plantilla Gastos)",
-                        xlsx_bytes,
-                        "plantilla_gastos.xlsx",
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        label="Baixar XLSX (Plantilla Gastos)",
+                        data=xlsx_bytes,
+                        file_name="plantilla_gastos.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True,
                     )
+
                 pbar.progress(100, text="Concluído.")
             except Exception as e:
                 st.error("Erro ao processar o arquivo Excel.")
                 st.exception(e)
 
     # -------------------------------------------------------------------------
-    # Modo: Analise — compara Estado de Cuenta x Plantilla
+    # Modo: Analise — compara Estado de Cuenta (CTA/Período) x Plantilla (Cuenta/Amount)
     # -------------------------------------------------------------------------
-    elif mode == "asientos":
+    elif mode == "asientos":  # Analise
         st.subheader("🔍 Analise: Estado de Cuenta x Plantilla de Gastos")
 
-        df_ec = st.session_state.get("aag_estado_df", None)
-        df_pg = st.session_state.get("aag_plantilla_df", None)
+        # Recupera datasets da sessão
+        df_ec = st.session_state.get("aag_estado_df", None)       # Estado de Cuenta (sem linha TOTAL)
+        df_pg = st.session_state.get("aag_plantilla_df", None)    # Plantilla de Gastos (primeira aba)
 
+        # Checagens
         missing = []
         if df_ec is None or df_ec.empty:
             missing.append("Estado de Cuenta (.txt)")
@@ -703,15 +609,21 @@ def render():
             )
             return
 
+        # Parâmetros
         tol = st.number_input("Valor de Tolerância", min_value=0.00, value=0.01, step=0.01)
 
+        # Helpers
         def _norm_conta(x) -> str:
+            """Normaliza o número da conta: apenas dígitos; remove zeros à esquerda."""
             s = re.sub(r"\D", "", str(x))
             s = s.lstrip("0")
             return s if s else ""
 
         pbar = st.progress(0, text="Consolidando Estado de Cuenta...")
 
+        # -----------------------
+        # 1) Estado de Cuenta (CTA/Período)
+        # -----------------------
         try:
             if "CTA" not in df_ec.columns or "Período" not in df_ec.columns:
                 st.error("Estado de Cuenta não contém as colunas esperadas: 'CTA' e 'Período'.")
@@ -727,13 +639,18 @@ def render():
                 .sum()
                 .rename(columns={"CTA": "Cuenta", "Período": "Saldo_Estado_Cuenta"})
             )
+
             pbar.progress(40, text="Consolidando Plantilla de Gastos...")
         except Exception as e:
             st.error("Erro ao consolidar Estado de Cuenta.")
             st.exception(e)
             return
 
+        # -----------------------
+        # 2) Plantilla de Gastos (Cuenta/Amount)
+        # -----------------------
         try:
+            # Detecta colunas 'Cuenta' e 'Amount' (case-insensitive)
             def _find_col(df, target):
                 for c in df.columns:
                     if str(c).strip().lower() == target:
@@ -743,6 +660,7 @@ def render():
 
             cuenta_col = _find_col(df_pg, "cuenta")
             amount_col = _find_col(df_pg, "amount")
+
             if cuenta_col is None or amount_col is None:
                 st.error("Plantilla não contém as colunas esperadas: 'Cuenta' e 'Amount'.")
                 return
@@ -757,35 +675,52 @@ def render():
                 .sum()
                 .rename(columns={"__conta__": "Cuenta", amount_col: "Saldo_Plantilla_Gastos"})
             )
+
             pbar.progress(70, text="Comparando saldos...")
         except Exception as e:
             st.error("Erro ao consolidar Plantilla de Gastos.")
             st.exception(e)
             return
 
+        # -----------------------
+        # 3) Comparação
+        # -----------------------
         try:
             df_cmp = pd.merge(df_ec_agg, df_pg_agg, on="Cuenta", how="outer")
             for c in ["Saldo_Estado_Cuenta", "Saldo_Plantilla_Gastos"]:
                 df_cmp[c] = pd.to_numeric(df_cmp[c], errors="coerce").fillna(0.0)
 
             df_cmp["Diferença"] = (df_cmp["Saldo_Plantilla_Gastos"] - df_cmp["Saldo_Estado_Cuenta"]).round(2)
+
+            # Flag só para filtro (não exibida)
             df_cmp["_div"] = df_cmp["Diferença"].abs() > float(tol)
 
+            # Ordenação por número da conta (ordem numérica crescente)
             df_cmp["_cuenta_num"] = pd.to_numeric(df_cmp["Cuenta"], errors="coerce")
             df_cmp = df_cmp.sort_values(by="_cuenta_num", ascending=True).drop(columns=["_cuenta_num"]).reset_index(drop=True)
 
             pbar.progress(90, text="Preparando visualização...")
 
+            # Métricas
             c1, c2, c3 = st.columns(3)
             with c1:
                 st.metric("Contas (Estado)", f"{df_ec_agg['Cuenta'].nunique():,}".replace(",", "."))
             with c2:
-                st.metric("Soma Estado de Cuentas", f"{df_ec_agg['Saldo_Estado_Cuenta'].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+                st.metric(
+                    "Soma Estado de Cuentas",
+                    f"{df_ec_agg['Saldo_Estado_Cuenta'].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+                )
             with c3:
-                st.metric("Soma Plantilla de Gastos", f"{df_pg_agg['Saldo_Plantilla_Gastos'].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+                st.metric(
+                    "Soma Plantilla de Gastos",
+                    f"{df_pg_agg['Saldo_Plantilla_Gastos'].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+                )
 
+            # Filtro: apenas divergentes
             only_div = st.checkbox("Mostrar apenas contas com divergência", value=True)
             df_show = df_cmp[df_cmp["_div"]] if only_div else df_cmp
+
+            # Exibição sem coluna de controle
             df_show = df_show[["Cuenta", "Saldo_Estado_Cuenta", "Saldo_Plantilla_Gastos", "Diferença"]]
 
             st.dataframe(
@@ -799,36 +734,40 @@ def render():
             )
 
             pbar.progress(95, text="Gerando arquivos para download...")
+
+            # Downloads (já ordenados pela Cuenta)
             col_d1, col_d2 = st.columns(2)
             with col_d1:
                 st.download_button(
-                    "Baixar CSV (Analise)",
-                    df_show.to_csv(index=False).encode("utf-8"),
-                    "analise_contas.csv",
-                    "text/csv",
+                    label="Baixar CSV (Analise)",
+                    data=df_show.to_csv(index=False).encode("utf-8"),
+                    file_name="analise_contas.csv",
+                    mime="text/csv",
                     use_container_width=True,
                 )
             with col_d2:
                 xlsx_bytes = to_xlsx_bytes_format(
-                    df_show, "Analise",
+                    df_show,
+                    sheet_name="Analise",
                     numeric_cols=["Saldo_Estado_Cuenta", "Saldo_Plantilla_Gastos", "Diferença"],
                     date_cols=[],
                 )
                 st.download_button(
-                    "Baixar XLSX (Analise)",
-                    xlsx_bytes,
-                    "analise_contas.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    label="Baixar XLSX (Analise)",
+                    data=xlsx_bytes,
+                    file_name="analise_contas.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                 )
 
             pbar.progress(100, text="Concluído.")
+
         except Exception as e:
             st.error("Erro durante a comparação.")
             st.exception(e)
 
     # -------------------------------------------------------------------------
-    # Modo: Cuenta (GL0061) — persistência de UI e botão sempre visível
+    # Modo: Cuenta (GL0061)
     # -------------------------------------------------------------------------
     elif mode == "cuenta":
         st.subheader("📘 Importar Archivo de Cuenta (GL0061)")
@@ -842,14 +781,12 @@ def render():
         with col_c:
             clear_clicked = st.button("Limpar", use_container_width=True)
 
-        # Limpar: reseta uploader e remove DF da sessão
         if clear_clicked:
             st.session_state["aag_state"]["uploader_key_cuenta"] = upl_key + "_x"
             if "aag_cuenta_df" in st.session_state:
                 del st.session_state["aag_cuenta_df"]
             st.rerun()
 
-        # Processar novo upload (se houver)
         if run_clicked and uploaded is not None:
             raw = uploaded.getvalue()
             try:
@@ -858,30 +795,29 @@ def render():
                 text = raw.decode("latin-1")
 
             try:
-                df_new = parse_cuenta_gl(text)
+                df = parse_cuenta_gl(text)
             except Exception as e:
                 st.error("Erro ao interpretar o arquivo GL0061.")
                 st.exception(e)
                 return
 
-            if df_new.empty:
+            if df.empty:
                 st.error("Nenhuma linha reconhecida no arquivo GL0061.")
                 return
 
-            # Monta Chave
-            cta_str   = df_new["CTA"].apply(_str_or_empty) if "CTA" in df_new.columns else pd.Series([""]*len(df_new))
-            fecha_str = df_new["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df_new.columns else pd.Series([""]*len(df_new))
-            tran_str  = df_new["Transacción"].apply(_str_or_empty) if "Transacción" in df_new.columns else pd.Series([""]*len(df_new))
-            sreal_str = df_new["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df_new.columns else pd.Series([""]*len(df_new))
-            df_new["Chave"] = cta_str + "|" + fecha_str + "|" + tran_str + "|" + sreal_str
+            # Campos: CTA, Fecha, Transacción, Saldo Real
+            cta_str   = df["CTA"].apply(_str_or_empty) if "CTA" in df.columns else pd.Series([""]*len(df))
+            fecha_str = df["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df.columns else pd.Series([""]*len(df))
+            tran_str  = df["Transacción"].apply(_str_or_empty) if "Transacción" in df.columns else pd.Series([""]*len(df))
+            sreal_str = df["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df.columns else pd.Series([""]*len(df))
+            
+            df["Chave"] = cta_str + "|" + fecha_str + "|" + tran_str + "|" + sreal_str
+            
+            # Salva com 'Chave'
+            st.session_state["aag_cuenta_df"] = df.copy()
 
-            st.session_state["aag_cuenta_df"] = df_new.copy()
-            st.success("Cuenta carregada e processada com sucesso.")
-
-        # Renderiza sempre que houver DF da cuenta na sessão
-        df_cu = st.session_state.get("aag_cuenta_df")
-        if df_cu is not None and not df_cu.empty:
-            date_cols = [c for c in ["Fecha", "Fechado"] if c in df_cu.columns]
+            # Colunas de data para exibição (Fecha e/ou Fechado)
+            date_cols = [c for c in ["Fecha", "Fechado"] if c in df.columns]
             col_cfg = {
                 "Debe": st.column_config.NumberColumn(format="%.2f"),
                 "Haber": st.column_config.NumberColumn(format="%.2f"),
@@ -891,100 +827,35 @@ def render():
             for dc in date_cols:
                 col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
 
-            st.dataframe(df_cu, use_container_width=True, height=580, column_config=col_cfg)
+            st.dataframe(
+                df,
+                use_container_width=True,
+                height=600,
+                column_config=col_cfg,
+            )
 
             col1, col2 = st.columns(2)
             with col1:
                 st.download_button(
-                    "Baixar CSV (Cuenta)",
-                    df_cu.to_csv(index=False).encode("utf-8"),
+                    "Baixar CSV",
+                    df.to_csv(index=False).encode("utf-8"),
                     "cuenta.csv",
                     "text/csv",
                     use_container_width=True
                 )
             with col2:
-                numeric_export = [c for c in ["Debe","Haber","Saldo Real","Saldo"] if c in df_cu.columns]
-                xlsx_bytes = to_xlsx_bytes_format(df_cu, "Cuenta", numeric_cols=numeric_export, date_cols=date_cols)
+                xlsx_bytes = to_xlsx_bytes_format(
+                    df, "Cuenta",
+                    numeric_cols=["Debe","Haber","Saldo Real","Saldo"],
+                    date_cols=date_cols
+                )
                 st.download_button(
-                    "Baixar XLSX (Cuenta)",
+                    "Baixar XLSX",
                     xlsx_bytes,
                     "cuenta.xlsx",
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
-
-            # ----- Botão fixo: Plantilla Gastos Atualizada -----
-            df_pg = st.session_state.get("aag_plantilla_df")
-            st.divider()
-            st.subheader("🧹 Plantilla Gastos Atualizada (baseada na Cuenta carregada)")
-
-            if df_pg is None or df_pg.empty:
-                st.info("Carregue a **Plantilla de Gastos** na aba correspondente para habilitar a atualização.")
-                return
-
-            tol_update = st.number_input(
-                "Tolerância para comparar saldos (|Plantilla - Cuenta|)",
-                min_value=0.00, value=0.01, step=0.01
-            )
-
-            gen_clicked = st.button("🧩 Gerar Plantilla Gastos Atualizada", type="primary", use_container_width=True)
-            if gen_clicked:
-                try:
-                    df_pg_atual, resumo_adj = build_plantilla_atualizada_com_cuenta(df_pg.copy(), df_cu.copy(), tol=tol_update)
-                    st.session_state["aag_plantilla_atualizada_df"] = df_pg_atual
-
-                    st.success("Plantilla de Gastos atualizada com sucesso para a conta carregada.")
-                    st.caption("Resumo das chaves comparadas (apenas desta CTA):")
-                    st.dataframe(
-                        resumo_adj,
-                        use_container_width=True,
-                        height=320,
-                        column_config={
-                            "soma_cu": st.column_config.NumberColumn(format="%.2f"),
-                            "soma_pg": st.column_config.NumberColumn(format="%.2f"),
-                            "dif": st.column_config.NumberColumn(format="%.2f"),
-                        }
-                    )
-
-                    # Detecta colunas de data para exportação
-                    amount_col_exp = _find_col_ci(df_pg_atual, ["Amount"])
-                    date_cols_exp = []
-                    for cand in ["TransactionDate", "Transaction Date", "TransDate", "Due_Date", "Invoice_Date", "DueDate", "InvoiceDate"]:
-                        c_real = _find_col_ci(df_pg_atual, [cand])
-                        if c_real is not None:
-                            date_cols_exp.append(c_real)
-                    date_cols_exp = list(dict.fromkeys(date_cols_exp))
-
-                    st.subheader("⬇️ Baixar Plantilla Gastos Atualizada")
-                    col_u1, col_u2 = st.columns(2)
-                    with col_u1:
-                        st.download_button(
-                            "Baixar CSV (Plantilla Atualizada)",
-                            df_pg_atual.to_csv(index=False).encode("utf-8"),
-                            "plantilla_gastos_atualizada.csv",
-                            "text/csv",
-                            use_container_width=True
-                        )
-                    with col_u2:
-                        xlsx_upd = to_xlsx_bytes_format(
-                            df_pg_atual,
-                            sheet_name="PlantillaAtualizada",
-                            numeric_cols=[amount_col_exp] if amount_col_exp else [],
-                            date_cols=date_cols_exp
-                        )
-                        st.download_button(
-                            "Baixar XLSX (Plantilla Atualizada)",
-                            xlsx_upd,
-                            "plantilla_gastos_atualizada.xlsx",
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True
-                        )
-
-                except Exception as e:
-                    st.error("Falha ao gerar Plantilla Gastos Atualizada.")
-                    st.exception(e)
-        else:
-            st.info("Carregue um arquivo **GL0061** ou mantenha o existente para gerar a Plantilla atualizada.")
 
     else:
         st.info("Selecione um modo acima para continuar.")
