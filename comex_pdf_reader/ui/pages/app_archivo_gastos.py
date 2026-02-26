@@ -191,44 +191,86 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
             texto
         ])
 
-    return pd.DataFrame(dados, columns=cols)
+    df = pd.DataFrame(dados, columns=cols)
+
+    # === Ajuste de data no dataframe de cuentas ===
+    # Se houver coluna 'Fechado' (alguns dumps usam esse nome), trata também.
+    for date_col in ["Fecha", "Fechado"]:
+        if date_col in df.columns:
+            df[date_col] = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True).dt.date
+
+    return df
 
 # -----------------------------------------------------------------------------
-# Export XLSX com máscara numérica #,##0.00 (mantém tipo numérico)
+# Export XLSX com máscara numérica e data
 # -----------------------------------------------------------------------------
-def to_xlsx_bytes_numformat(df: pd.DataFrame, sheet_name: str, numeric_cols: list[str]) -> bytes:
+def to_xlsx_bytes_format(
+    df: pd.DataFrame,
+    sheet_name: str,
+    numeric_cols: list[str] | None = None,
+    date_cols: list[str] | None = None
+) -> bytes:
+    """
+    Exporta para XLSX aplicando:
+      - número: #,##0.00
+      - data: dd/mm/yyyy
+    """
+    numeric_cols = numeric_cols or []
+    date_cols = date_cols or []
+
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name=sheet_name)
+        # Para manter tipo data no Excel, converte objetos date para datetime64[ns] (sem horário)
+        df_to_save = df.copy()
+        for dc in date_cols:
+            if dc in df_to_save.columns:
+                # Se a coluna está como datetime.date, converte para datetime64
+                df_to_save[dc] = pd.to_datetime(df_to_save[dc], errors="coerce")
+
+        df_to_save.to_excel(writer, index=False, sheet_name=sheet_name)
         ws = writer.book[sheet_name]
 
-        # Aplica máscara #,##0.00 nas colunas numéricas indicadas
-        for col_name in numeric_cols:
-            if col_name not in df.columns:
-                continue
-            col_idx = df.columns.get_loc(col_name) + 1  # 1-based
-            for row in range(2, ws.max_row + 1):  # pulando cabeçalho
-                cell = ws.cell(row=row, column=col_idx)
-                if isinstance(cell.value, (int, float)) and cell.value is not None:
-                    cell.number_format = '#,##0.00'
-
-        # Cabeçalho estilizado (azul) e ajuste de largura simples
+        # Estilos de cabeçalho
         BLUE = "FF0077B6"
         WHITE = "FFFFFFFF"
         fill_blue = PatternFill(fill_type="solid", start_color=BLUE, end_color=BLUE)
         font_white_bold = Font(color=WHITE, bold=True)
-
         for cell in ws[1]:
             cell.fill = fill_blue
             cell.font = font_white_bold
 
+        # Formatação numérica
+        for col_name in numeric_cols:
+            if col_name not in df_to_save.columns:
+                continue
+            col_idx = df_to_save.columns.get_loc(col_name) + 1
+            for row in range(2, ws.max_row + 1):
+                cell = ws.cell(row=row, column=col_idx)
+                if isinstance(cell.value, (int, float)) and cell.value is not None:
+                    cell.number_format = '#,##0.00'
+
+        # Formatação de data
+        for col_name in date_cols:
+            if col_name not in df_to_save.columns:
+                continue
+            col_idx = df_to_save.columns.get_loc(col_name) + 1
+            for row in range(2, ws.max_row + 1):
+                cell = ws.cell(row=row, column=col_idx)
+                # openpyxl trata datetime como Python datetime; só aplicar formato
+                if cell.value:
+                    cell.number_format = 'dd/mm/yyyy'
+
+        # Ajuste de largura
         for col_idx in range(1, ws.max_column + 1):
             max_len = 10
             for row in range(1, ws.max_row + 1):
                 v = ws.cell(row=row, column=col_idx).value
                 if v is None:
                     continue
-                s = f"{v:,.2f}" if isinstance(v, (int, float)) else str(v)
+                if isinstance(v, (int, float)):
+                    s = f"{v:,.2f}"
+                else:
+                    s = str(v)
                 max_len = max(max_len, len(s))
             ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 2, 60)
 
@@ -341,8 +383,8 @@ def render():
                         use_container_width=True,
                     )
                 with col_xlsx:
-                    xlsx_bytes = to_xlsx_bytes_numformat(
-                        df, sheet_name="EstadoCuenta", numeric_cols=numeric_cols
+                    xlsx_bytes = to_xlsx_bytes_format(
+                        df, sheet_name="EstadoCuenta", numeric_cols=numeric_cols, date_cols=[]
                     )
                     st.download_button(
                         label="Baixar XLSX (Estado de Cuenta)",
@@ -369,7 +411,7 @@ def render():
             type=["xlsx", "xls"],
             accept_multiple_files=False,
             key=upl_key_pg,
-            help="A coluna 'Amount' será formatada como 111,111,111.00 na visualização e no XLSX.",
+            help="As colunas de data serão convertidas para dd/mm/aaaa e Amount formatado como número.",
         )
 
         col_run, col_clear = st.columns([2, 1])
@@ -406,6 +448,36 @@ def render():
                     st.error("Coluna 'Amount' não encontrada no arquivo.")
                     return
 
+                # === Datas na Plantilla: TransactionDate, Due_Date, Invoice_Date ===
+                # normalizador de nomes para encontrar colunas mesmo com variações
+                def norm(s: str) -> str:
+                    return re.sub(r"[^a-z0-9]", "", str(s).strip().lower())
+
+                date_targets = {
+                    "transactiondate": None,
+                    "due_date": None,
+                    "invoicedate": None,
+                    "invoice_date": None,
+                }
+                # Mapear colunas do DF a alvos
+                found_date_cols = []
+                for c in df_pg.columns:
+                    nc = norm(c)
+                    if nc == "transactiondate":
+                        date_targets["transactiondate"] = c
+                    elif nc in ("duedate", "due_date"):
+                        date_targets["due_date"] = c
+                    elif nc in ("invoicedate", "invoice_date"):
+                        # Prioriza a primeira encontrada
+                        if date_targets.get("invoicedate") is None:
+                            date_targets["invoicedate"] = c
+
+                # Converte cada coluna encontrada para data (dd/mm/aaaa)
+                for key, col in date_targets.items():
+                    if col and col in df_pg.columns:
+                        df_pg[col] = pd.to_datetime(df_pg[col], errors="coerce", dayfirst=True).dt.date
+                        found_date_cols.append(col)
+
                 # Garante tipo numérico em Amount
                 df_pg[amount_col] = pd.to_numeric(df_pg[amount_col], errors="coerce")
 
@@ -414,13 +486,19 @@ def render():
 
                 pbar.progress(70, text="Preparando visualização...")
                 st.success("Arquivo carregado com sucesso.")
+
+                # Configuração de colunas para visualização
+                col_cfg = {
+                    str(amount_col): st.column_config.NumberColumn(format="%.2f")
+                }
+                for dc in found_date_cols:
+                    col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
+
                 st.dataframe(
                     df_pg,
                     use_container_width=True,
                     height=550,
-                    column_config={
-                        str(amount_col): st.column_config.NumberColumn(format="%.2f")
-                    },
+                    column_config=col_cfg,
                 )
 
                 pbar.progress(90, text="Gerando arquivos para download...")
@@ -434,8 +512,11 @@ def render():
                         use_container_width=True,
                     )
                 with col_xlsx:
-                    xlsx_bytes = to_xlsx_bytes_numformat(
-                        df_pg, sheet_name="PlantillaGastos", numeric_cols=[amount_col]
+                    xlsx_bytes = to_xlsx_bytes_format(
+                        df_pg,
+                        sheet_name="PlantillaGastos",
+                        numeric_cols=[amount_col],
+                        date_cols=found_date_cols,
                     )
                     st.download_button(
                         label="Baixar XLSX (Plantilla Gastos)",
@@ -474,7 +555,7 @@ def render():
             )
             return
 
-        # Parâmetros (rótulo atualizado)
+        # Parâmetros
         tol = st.number_input("Valor de Tolerância", min_value=0.00, value=0.01, step=0.01)
 
         # Helpers
@@ -560,13 +641,13 @@ def render():
             # Flag só para filtro (não exibida)
             df_cmp["_div"] = df_cmp["Diferença"].abs() > float(tol)
 
-            # ✅ Ordenação pedida: do menor para o maior por Cuenta (ordem numérica)
+            # Ordenação por número da conta (ordem numérica crescente)
             df_cmp["_cuenta_num"] = pd.to_numeric(df_cmp["Cuenta"], errors="coerce")
             df_cmp = df_cmp.sort_values(by="_cuenta_num", ascending=True).drop(columns=["_cuenta_num"]).reset_index(drop=True)
 
             pbar.progress(90, text="Preparando visualização...")
 
-            # Métricas (rótulos atualizados)
+            # Métricas
             c1, c2, c3 = st.columns(3)
             with c1:
                 st.metric("Contas (Estado)", f"{df_ec_agg['Cuenta'].nunique():,}".replace(",", "."))
@@ -611,10 +692,11 @@ def render():
                     use_container_width=True,
                 )
             with col_d2:
-                xlsx_bytes = to_xlsx_bytes_numformat(
+                xlsx_bytes = to_xlsx_bytes_format(
                     df_show,
                     sheet_name="Analise",
                     numeric_cols=["Saldo_Estado_Cuenta", "Saldo_Plantilla_Gastos", "Diferença"],
+                    date_cols=[],
                 )
                 st.download_button(
                     label="Baixar XLSX (Analise)",
@@ -671,16 +753,22 @@ def render():
 
             st.session_state["aag_cuenta_df"] = df.copy()
 
+            # Colunas de data para exibição (Fecha e/ou Fechado)
+            date_cols = [c for c in ["Fecha", "Fechado"] if c in df.columns]
+            col_cfg = {
+                "Debe": st.column_config.NumberColumn(format="%.2f"),
+                "Haber": st.column_config.NumberColumn(format="%.2f"),
+                "Saldo Real": st.column_config.NumberColumn(format="%.2f"),
+                "Saldo": st.column_config.NumberColumn(format="%.2f"),
+            }
+            for dc in date_cols:
+                col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
+
             st.dataframe(
                 df,
                 use_container_width=True,
                 height=600,
-                column_config={
-                    "Debe": st.column_config.NumberColumn(format="%.2f"),
-                    "Haber": st.column_config.NumberColumn(format="%.2f"),
-                    "Saldo Real": st.column_config.NumberColumn(format="%.2f"),
-                    "Saldo": st.column_config.NumberColumn(format="%.2f"),
-                },
+                column_config=col_cfg,
             )
 
             col1, col2 = st.columns(2)
@@ -693,7 +781,11 @@ def render():
                     use_container_width=True
                 )
             with col2:
-                xlsx_bytes = to_xlsx_bytes_numformat(df, "Cuenta", ["Debe","Haber","Saldo Real","Saldo"])
+                xlsx_bytes = to_xlsx_bytes_format(
+                    df, "Cuenta",
+                    numeric_cols=["Debe","Haber","Saldo Real","Saldo"],
+                    date_cols=date_cols
+                )
                 st.download_button(
                     "Baixar XLSX",
                     xlsx_bytes,
