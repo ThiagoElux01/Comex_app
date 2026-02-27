@@ -495,29 +495,32 @@ def render():
 
     col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns(5)
 
-    limpeza_pg_clicked = False
-
     with col_b1:
         if st.button("Estado de Cuenta", use_container_width=True):
             _set_mode("estado")
+            st.session_state["aag_state"]["last_action"] = "estado"
     with col_b2:
         if st.button("Plantilla Gastos", use_container_width=True):
             _set_mode("plantilla")
+            st.session_state["aag_state"]["last_action"] = "plantilla"
     with col_b3:
         if st.button("Analise", use_container_width=True):
             _set_mode("asientos")
+            st.session_state["aag_state"]["last_action"] = "asientos"
     with col_b4:
         if st.button("Cuenta", use_container_width=True):
             _set_mode("cuenta")
+            st.session_state["aag_state"]["last_action"] = "cuenta"
     with col_b5:
         if st.button("Limpieza Plantilla Gastos", use_container_width=True):
-            limpeza_pg_clicked = True
+            _set_mode("limpieza")  # <<< vira um modo persistente
+            st.session_state["aag_state"]["last_action"] = "limpieza_pg"
 
     mode = st.session_state["aag_mode"]
     st.divider()
 
-    # ====== AÇÃO: Limpieza Plantilla Gastos ======
-    if limpeza_pg_clicked or st.session_state["aag_state"].get("last_action") == "limpieza_pg":
+    # ====== MODO: Limpieza Plantilla Gastos ======
+    if mode == "limpieza":
         st.subheader("🧹 Limpieza da Plantilla de Gastos")
         try:
             df_pg_orig = st.session_state.get("aag_plantilla_df_orig", None)
@@ -533,54 +536,51 @@ def render():
                 st.session_state["aag_state"]["last_action"] = "limpieza_pg"
 
                 c1, c2, c3 = st.columns(3)
-                
                 with c1:
                     st.metric("Linhas (Original)", f"{stats['rows_original']:,}".replace(",", "."))
-                
                 with c2:
                     st.metric("Linhas (Limpo)", f"{stats['rows_clean']:,}".replace(",", "."))
-                
                 with c3:
                     st.metric("Removidas", f"{stats['rows_removed']:,}".replace(",", "."))
-                
+
                 if stats["rows_removed"] == 0:
                     st.info("Nenhuma divergência de contagem encontrada. Nada foi removido.")
-                    
+
                 # =========================
                 # Analise (pós-limpeza)
                 # =========================
                 st.divider()
                 st.subheader("🔍 Analise (Estado de Cuenta × Plantilla **limpa**)")
-                
+
                 # Precisamos do Estado e da Plantilla limpa
                 df_ec = st.session_state.get("aag_estado_df", None)
                 df_pg_clean = st.session_state.get("aag_plantilla_df_clean", None)
                 df_pg_orig = st.session_state.get("aag_plantilla_df_orig", None)
-                
+
                 if df_ec is None or df_ec.empty:
                     st.warning("Para rodar a análise, primeiro carregue e execute o **Estado de Cuenta**.")
                 elif df_pg_clean is None or df_pg_clean.empty:
                     st.warning("Nenhuma Plantilla limpa encontrada. Execute a **Limpieza Plantilla Gastos**.")
                 else:
                     # Tolerância de comparação (igual à do botão Analise)
-                    tol = st.number_input("Valor de Tolerância", min_value=0.00, value=0.01, step=0.01)
-                
+                    tol = st.number_input("Valor de Tolerância", min_value=0.00, value=0.01, step=0.01, key="limpieza_tol")
+
                     def _norm_conta(x) -> str:
                         s = re.sub(r"\D", "", str(x))
                         s = s.lstrip("0")
                         return s if s else ""
-                
+
                     # --- Consolida Estado de Cuenta (CTA x Período) ---
                     try:
                         if "CTA" not in df_ec.columns or "Período" not in df_ec.columns:
                             st.error("Estado de Cuenta não contém as colunas esperadas: 'CTA' e 'Período'.")
                             st.stop()
-                
+
                         df_ec_proc = df_ec.copy()
                         df_ec_proc["CTA"] = df_ec_proc["CTA"].apply(_norm_conta)
                         df_ec_proc["Período"] = pd.to_numeric(df_ec_proc["Período"], errors="coerce").fillna(0.0)
                         df_ec_proc = df_ec_proc[df_ec_proc["CTA"].astype(str).str.len() > 0]
-                
+
                         df_ec_agg = (
                             df_ec_proc.groupby("CTA", as_index=False)["Período"]
                             .sum()
@@ -590,7 +590,7 @@ def render():
                         st.error("Erro ao consolidar Estado de Cuenta (pós-limpeza).")
                         st.exception(e)
                         st.stop()
-                
+
                     # Helper para localizar colunas (case-insensitive, substrings)
                     def _find_col(df: pd.DataFrame, target: str):
                         for c in df.columns:
@@ -598,21 +598,21 @@ def render():
                                 return c
                         cand = [c for c in df.columns if target in str(c).strip().lower()]
                         return cand[0] if cand else None
-                
+
                     # --- Consolida Plantilla LIMPA (Cuenta x Amount) ---
                     try:
                         cuenta_col_clean = _find_col(df_pg_clean, "cuenta")
                         amount_col_clean = _find_col(df_pg_clean, "amount")
-                
+
                         if cuenta_col_clean is None or amount_col_clean is None:
                             st.error("Plantilla (limpa) não contém as colunas esperadas: 'Cuenta' e 'Amount'.")
                             st.stop()
-                
+
                         df_pg_c = df_pg_clean.copy()
                         df_pg_c[amount_col_clean] = pd.to_numeric(df_pg_c[amount_col_clean], errors="coerce").fillna(0.0)
                         df_pg_c["__conta__"] = df_pg_c[cuenta_col_clean].apply(_norm_conta)
                         df_pg_c = df_pg_c[df_pg_c["__conta__"].astype(str).str.len() > 0]
-                
+
                         df_pg_clean_agg = (
                             df_pg_c.groupby("__conta__", as_index=False)[amount_col_clean]
                             .sum()
@@ -622,7 +622,7 @@ def render():
                         st.error("Erro ao consolidar Plantilla (limpa).")
                         st.exception(e)
                         st.stop()
-                
+
                     # --- Consolida Plantilla ORIGINAL (para identificar contas ajustadas) ---
                     df_pg_orig_agg = None
                     contas_ajustadas = pd.DataFrame(columns=["Cuenta", "Ajustada"])
@@ -630,24 +630,24 @@ def render():
                         if df_pg_orig is not None and not df_pg_orig.empty:
                             cuenta_col_orig = _find_col(df_pg_orig, "cuenta")
                             amount_col_orig = _find_col(df_pg_orig, "amount")
-                
+
                             if cuenta_col_orig and amount_col_orig:
                                 df_pg_o = df_pg_orig.copy()
                                 df_pg_o[amount_col_orig] = pd.to_numeric(df_pg_o[amount_col_orig], errors="coerce").fillna(0.0)
                                 df_pg_o["__conta__"] = df_pg_o[cuenta_col_orig].apply(_norm_conta)
                                 df_pg_o = df_pg_o[df_pg_o["__conta__"].astype(str).str.len() > 0]
-                
+
                                 df_pg_orig_agg = (
                                     df_pg_o.groupby("__conta__", as_index=False)[amount_col_orig]
                                     .sum()
                                     .rename(columns={"__conta__": "Cuenta", amount_col_orig: "Saldo_Plantilla_Original"})
                                 )
-                
+
                                 # Junta original × limpa para detectar se a conta mudou
                                 df_cmp_adj = pd.merge(df_pg_orig_agg, df_pg_clean_agg, on="Cuenta", how="outer")
                                 for c in ["Saldo_Plantilla_Original", "Saldo_Plantilla_Gastos"]:
                                     df_cmp_adj[c] = pd.to_numeric(df_cmp_adj[c], errors="coerce").fillna(0.0)
-                
+
                                 # Ajustada = saldo mudou após a limpeza (considera tolerância)
                                 contas_ajustadas = df_cmp_adj.assign(
                                     Ajustada=(df_cmp_adj["Saldo_Plantilla_Original"] - df_cmp_adj["Saldo_Plantilla_Gastos"]).abs() > float(tol)
@@ -656,44 +656,44 @@ def render():
                         st.error("Erro ao calcular contas ajustadas.")
                         st.exception(e)
                         st.stop()
-                
+
                     # --- Merge final (Estado × Plantilla LIMPA) e cálculo de diferença ---
                     df_cmp = pd.merge(df_ec_agg, df_pg_clean_agg, on="Cuenta", how="outer")
                     for c in ["Saldo_Estado_Cuenta", "Saldo_Plantilla_Gastos"]:
                         df_cmp[c] = pd.to_numeric(df_cmp[c], errors="coerce").fillna(0.0)
-                
+
                     df_cmp["Diferença"] = (df_cmp["Saldo_Plantilla_Gastos"] - df_cmp["Saldo_Estado_Cuenta"]).round(2)
-                
+
                     # Marca divergência pela tolerância
                     df_cmp["_div"] = df_cmp["Diferença"].abs() > float(tol)
-                
+
                     # Junta a flag de Ajustada (se disponível)
                     if not contas_ajustadas.empty:
                         df_cmp = pd.merge(df_cmp, contas_ajustadas, on="Cuenta", how="left")
                         df_cmp["Ajustada"] = df_cmp["Ajustada"].fillna(False)
                     else:
                         df_cmp["Ajustada"] = False
-                
+
                     # Ordena por número de conta
                     df_cmp["_cuenta_num"] = pd.to_numeric(df_cmp["Cuenta"], errors="coerce")
                     df_cmp = df_cmp.sort_values(by="_cuenta_num", ascending=True).drop(columns=["_cuenta_num"]).reset_index(drop=True)
-                
-                    # ---- Filtros pedidos ----
+
+                    # ---- Filtros ----
                     col_f1, col_f2 = st.columns(2)
                     with col_f1:
-                        only_div = st.checkbox("Mostrar apenas contas com divergência", value=True)
+                        only_div = st.checkbox("Mostrar apenas contas com divergência", value=True, key="limpieza_only_div")
                     with col_f2:
-                        only_adj = st.checkbox("Mostrar apenas contas Ajustadas", value=False)
-                
+                        only_adj = st.checkbox("Mostrar apenas contas Ajustadas", value=False, key="limpieza_only_adj")
+
                     df_show = df_cmp.copy()
                     if only_div:
                         df_show = df_show[df_show["_div"]]
                     if only_adj:
                         df_show = df_show[df_show["Ajustada"]]
-                
+
                     # Colunas finais para exibição
                     df_show = df_show[["Cuenta", "Saldo_Estado_Cuenta", "Saldo_Plantilla_Gastos", "Diferença", "Ajustada"]]
-                
+
                     # Exibição
                     st.dataframe(
                         df_show,
@@ -705,7 +705,7 @@ def render():
                             "Ajustada": st.column_config.CheckboxColumn(),
                         },
                     )
-                
+
                     # Downloads
                     col_d1, col_d2 = st.columns(2)
                     with col_d1:
@@ -730,11 +730,6 @@ def render():
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             use_container_width=True,
                         )
-                
-                # ---- REMOVIDO ----
-                # - métrica "Chaves Ajustadas"
-                # - expander com detalhes por chave
-                # -------------------
 
                 # Prévia da Plantilla de Gastos (após limpeza) — SOMENTE nesta aba
                 df_pg_prev = st.session_state["aag_plantilla_df_clean"]
@@ -776,7 +771,8 @@ def render():
         except Exception as e:
             st.error("Erro durante a limpeza da Plantilla de Gastos.")
             st.exception(e)
-        st.stop()
+
+        return  # encerra o render no modo 'limpieza'
 
     # -------------------------------------------------------------------------
     # Modo: Estado de Cuenta (.txt)
