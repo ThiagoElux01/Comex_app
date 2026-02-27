@@ -30,8 +30,6 @@ from ui.pages import app_archivo_gastos
         process_pdfs.render()
     elif page == "Aplicación Archivo Gastos":
         app_archivo_gastos.render()
-    elif page == "Asientos Contables":                      # ← NOVO
-        render_asientos_contables_ui(session_key_df="asientos_df")
     elif page == "Configurações":
         settings_page.render()
     else:
