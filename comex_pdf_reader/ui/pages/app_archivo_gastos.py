@@ -1198,7 +1198,7 @@ def render():
         st.subheader("📘 Importar Archivo de Cuenta (GL0061)")
 
         upl_key = st.session_state["aag_state"].setdefault("uploader_key_cuenta", "aag_cuenta_upl_1")
-        uploaded = st.file_uploader("Selecionar arquivo GL0061 (.txt)", type=["txt"], key=upl_key)
+        uploaded = st.file_uploader("Selecionar arquivo GL0061 (.txt)", type=["txt"], key=upl_key,accept_multiple_files=True)
 
         col_r, col_c = st.columns([2, 1])
         with col_r:
@@ -1212,33 +1212,57 @@ def render():
                 del st.session_state["aag_cuenta_df"]
             st.rerun()
 
-        if run_clicked and uploaded is not None:
-            raw = uploaded.getvalue()
-            try:
-                text = raw.decode("utf-8")
-            except Exception:
-                text = raw.decode("latin-1")
-
-            try:
-                df = parse_cuenta_gl(text)
-            except Exception as e:
-                st.error("Erro ao interpretar o arquivo GL0061.")
-                st.exception(e)
+        if run_clicked and uploaded:
+            dfs = []
+            for up in uploaded:
+                try:
+                    raw = up.getvalue()
+                    try:
+                        text = raw.decode("utf-8")
+                    except Exception:
+                        text = raw.decode("latin-1")
+        
+                    # Parse de cada arquivo
+                    try:
+                        df_part = parse_cuenta_gl(text)
+                    except Exception as e:
+                        st.error(f"Erro ao interpretar o arquivo GL0061: {getattr(up, 'name', '(sem nome)')}")
+                        st.exception(e)
+                        continue
+        
+                    if df_part is None or df_part.empty:
+                        st.error(f"Nenhuma linha reconhecida no arquivo GL0061: {getattr(up, 'name', '(sem nome)')}")
+                        continue
+        
+                    # Montagem da Chave no MESMO formato que você já usa (com '|')
+                    cta_str   = df_part["CTA"].apply(_str_or_empty) if "CTA" in df_part.columns else pd.Series([""] * len(df_part))
+                    fecha_str = df_part["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df_part.columns else pd.Series([""] * len(df_part))
+                    tran_str  = df_part["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df_part.columns else pd.Series([""] * len(df_part))
+                    sreal_str = df_part["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df_part.columns else pd.Series([""] * len(df_part))
+        
+                    df_part["Chave"] = cta_str + "|" + fecha_str + "|" + tran_str + "|" + sreal_str
+        
+                    # (Opcional) coluna para rastrear arquivo de origem
+                    df_part["Arquivo"] = getattr(up, "name", "")
+        
+                    dfs.append(df_part)
+        
+                except Exception as e:
+                    st.error(f"Falha ao processar o arquivo: {getattr(up, 'name', '(sem nome)')}")
+                    st.exception(e)
+        
+            if not dfs:
+                st.error("Nenhum arquivo GL0061 válido foi processado.")
                 return
-
-            if df.empty:
-                st.error("Nenhuma linha reconhecida no arquivo GL0061.")
-                return
-
-            cta_str = df["CTA"].apply(_str_or_empty) if "CTA" in df.columns else pd.Series([""] * len(df))
-            fecha_str = df["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df.columns else pd.Series([""] * len(df))
-            tran_str = df["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df.columns else pd.Series([""] * len(df))
-            sreal_str = df["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df.columns else pd.Series([""] * len(df))
-
-            df["Chave"] = cta_str + "|" + fecha_str + "|" + tran_str + "|" + sreal_str
-
-            st.session_state["aag_cuenta_df"] = df.copy()
-
+        
+            # Concatena tudo
+            df_all = pd.concat(dfs, ignore_index=True)
+        
+            # (Opcional) se quiser remover duplicatas pelo identificador composto:
+            # df_all = df_all.drop_duplicates(subset=["Chave"])
+        
+            st.session_state["aag_cuenta_df"] = df_all.copy()
+            
         if "aag_cuenta_df" in st.session_state and isinstance(st.session_state["aag_cuenta_df"], pd.DataFrame):
             df = st.session_state["aag_cuenta_df"]
 
