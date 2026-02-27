@@ -7,7 +7,6 @@ from settings import PAGES, APP_NAME
 from ui.pages import home, process_pdfs, settings_page
 from ui.pages import downloads_page
 from ui.pages import app_archivo_gastos
-from asientos_contables_module import render_asientos_contables_ui
 
 def main():
     st.set_page_config(page_title="COMEX PDF READER", page_icon="📄", layout="wide")
