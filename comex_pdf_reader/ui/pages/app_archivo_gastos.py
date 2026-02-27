@@ -807,31 +807,51 @@ def render():
             st.rerun()
 
         if run_clicked and uploaded is not None:
-            pbar = st.progress(0, text="Lendo arquivo .txt...")
-            try:
-                raw_bytes = uploaded.getvalue()
+
+            # garante lista acumulada:
+            if "aag_cuenta_list" not in st.session_state:
+                st.session_state["aag_cuenta_list"] = []
+        
+            cuenta_list = st.session_state["aag_cuenta_list"]
+        
+            # agora permite carregar 1 ou MAIS arquivos
+            files = uploaded if isinstance(uploaded, list) else [uploaded]
+        
+            for file in files:
+                raw = file.getvalue()
                 try:
-                    text = raw_bytes.decode("utf-8")
-                except UnicodeDecodeError:
-                    text = raw_bytes.decode("latin-1")
-
-                pbar.progress(35, text="Convertendo para DataFrame...")
-                df_base = parse_estado_cuenta_txt(text)
-
-                if df_base is None or df_base.empty:
-                    st.warning("Nenhuma linha válida encontrada no arquivo.")
-                    pbar.progress(0, text="Aguardando...")
-                    return
-
-                st.session_state["aag_estado_df"] = df_base.copy()
-
-                pbar.progress(70, text="Preparando visualização...")
-                st.success("Arquivo processado com sucesso.")
-                pbar.progress(100, text="Concluído.")
-            except Exception as e:
-                st.error("Erro ao processar o arquivo .txt.")
-                st.exception(e)
-
+                    text = raw.decode("utf-8")
+                except Exception:
+                    text = raw.decode("latin-1")
+        
+                try:
+                    df_part = parse_cuenta_gl(text)
+                except Exception as e:
+                    st.error(f"Erro ao ler GL0061: {file.name}")
+                    st.exception(e)
+                    continue
+        
+                # prepara Chave (mantém igual seu código atual)
+                cta_str   = df_part["CTA"].apply(_str_or_empty)
+                fecha_str = df_part["Fecha"].apply(_fmt_date_ddmmyyyy)
+                tran_str  = df_part["Transacción"].apply(_fmt_transno_keep_zeros)
+                sreal_str = df_part["Saldo Real"].apply(_fmt_num_2dec_point)
+        
+                df_part["Chave"] = (
+                    cta_str + "\n" + fecha_str + "\n" + tran_str + "\n" + sreal_str
+                )
+        
+                # adiciona à lista acumulada
+                cuenta_list.append(df_part)
+        
+            # consolida tudo em um único dataframe
+            df_all = pd.concat(cuenta_list, ignore_index=True)
+        
+            # salva no formato esperado pelo resto do código
+            st.session_state["aag_cuenta_df"] = df_all.copy()
+        
+            st.success(f"Total acumulado: {len(df_all):,} linhas")
+    
         if "aag_estado_df" in st.session_state and isinstance(st.session_state["aag_estado_df"], pd.DataFrame):
             df_base = st.session_state["aag_estado_df"]
 
