@@ -1194,54 +1194,99 @@ def render():
     # -------------------------------------------------------------------------
     # Modo: Cuenta (GL0061)
     # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Modo: Cuenta (GL0061)  >>> BLOCO SUBSTITUÍDO PARA SUPORTAR VÁRIOS ARQUIVOS
+    # -------------------------------------------------------------------------
     elif mode == "cuenta":
         st.subheader("📘 Importar Archivo de Cuenta (GL0061)")
-
+    
         upl_key = st.session_state["aag_state"].setdefault("uploader_key_cuenta", "aag_cuenta_upl_1")
-        uploaded = st.file_uploader("Selecionar arquivo GL0061 (.txt)", type=["txt"], key=upl_key)
-
+        uploaded_files = st.file_uploader(
+            "Selecionar um ou mais arquivos GL0061 (.txt)",
+            type=["txt"],
+            key=upl_key,
+            accept_multiple_files=True
+        )
+    
         col_r, col_c = st.columns([2, 1])
         with col_r:
-            run_clicked = st.button("▶️ Processar Cuenta", type="primary", use_container_width=True, disabled=(uploaded is None))
+            run_clicked = st.button(
+                "▶️ Processar Cuenta(s)",
+                type="primary",
+                use_container_width=True,
+                disabled=(not uploaded_files or len(uploaded_files) == 0)
+            )
         with col_c:
             clear_clicked = st.button("Limpar", use_container_width=True)
-
+    
         if clear_clicked:
+            # reseta a key do uploader e limpa o DF de cuenta
             st.session_state["aag_state"]["uploader_key_cuenta"] = upl_key + "_x"
             if "aag_cuenta_df" in st.session_state:
                 del st.session_state["aag_cuenta_df"]
             st.rerun()
-
-        if run_clicked and uploaded is not None:
-            raw = uploaded.getvalue()
+    
+        if run_clicked and uploaded_files:
+            # Processa múltiplos arquivos
+            dfs = []
+            pbar = st.progress(0, text=f"Lendo {len(uploaded_files)} arquivo(s)...")
             try:
-                text = raw.decode("utf-8")
-            except Exception:
-                text = raw.decode("latin-1")
-
-            try:
-                df = parse_cuenta_gl(text)
+                for idx, uploaded in enumerate(uploaded_files, start=1):
+                    raw = uploaded.getvalue()
+                    # decodificação robusta
+                    try:
+                        text = raw.decode("utf-8")
+                    except Exception:
+                        text = raw.decode("latin-1")
+    
+                    # parse individual
+                    try:
+                        df_i = parse_cuenta_gl(text)
+                    except Exception as e:
+                        st.error(f"Erro ao interpretar o arquivo GL0061: {getattr(uploaded, 'name', '(sem nome)')}")
+                        st.exception(e)
+                        continue
+    
+                    if df_i is None or df_i.empty:
+                        st.warning(f"Nenhuma linha reconhecida no arquivo: {getattr(uploaded, 'name', '(sem nome)')}")
+                        continue
+    
+                    # monta Chave para o arquivo atual
+                    cta_str  = df_i["CTA"].apply(_str_or_empty) if "CTA" in df_i.columns else pd.Series([""] * len(df_i))
+                    fecha_str = df_i["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df_i.columns else pd.Series([""] * len(df_i))
+                    tran_str  = df_i["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df_i.columns else pd.Series([""] * len(df_i))
+                    sreal_str = df_i["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df_i.columns else pd.Series([""] * len(df_i))
+    
+                    df_i["Chave"] = cta_str + "\n" + fecha_str + "\n" + tran_str + "\n" + sreal_str
+    
+                    # opcional: adiciona coluna do nome do arquivo para rastreabilidade
+                    df_i["_Archivo"] = getattr(uploaded, "name", "")
+    
+                    dfs.append(df_i)
+    
+                    # avança progress bar
+                    prog = int(100 * (idx / max(len(uploaded_files), 1)))
+                    pbar.progress(prog, text=f"Processando {idx}/{len(uploaded_files)}...")
+    
+                # concatena todos
+                if len(dfs) == 0:
+                    st.error("Nenhum dado válido foi encontrado nos arquivos enviados.")
+                    return
+    
+                df_all = pd.concat(dfs, ignore_index=True)
+                st.session_state["aag_cuenta_df"] = df_all.copy()
+    
+                pbar.progress(100, text="Concluído.")
+                st.success(f"{len(dfs)} arquivo(s) processado(s) e consolidado(s).")
+    
             except Exception as e:
-                st.error("Erro ao interpretar o arquivo GL0061.")
+                st.error("Erro ao processar os arquivos GL0061.")
                 st.exception(e)
-                return
-
-            if df.empty:
-                st.error("Nenhuma linha reconhecida no arquivo GL0061.")
-                return
-
-            cta_str = df["CTA"].apply(_str_or_empty) if "CTA" in df.columns else pd.Series([""] * len(df))
-            fecha_str = df["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df.columns else pd.Series([""] * len(df))
-            tran_str = df["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df.columns else pd.Series([""] * len(df))
-            sreal_str = df["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df.columns else pd.Series([""] * len(df))
-
-            df["Chave"] = cta_str + "|" + fecha_str + "|" + tran_str + "|" + sreal_str
-
-            st.session_state["aag_cuenta_df"] = df.copy()
-
+    
+        # Exibição / download do consolidado
         if "aag_cuenta_df" in st.session_state and isinstance(st.session_state["aag_cuenta_df"], pd.DataFrame):
             df = st.session_state["aag_cuenta_df"]
-
+    
             date_cols = [c for c in ["Fecha", "Fechado"] if c in df.columns]
             col_cfg = {
                 "Debe": st.column_config.NumberColumn(format="%.2f"),
@@ -1251,15 +1296,15 @@ def render():
             }
             for dc in date_cols:
                 col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
-
+    
             st.dataframe(df, use_container_width=True, height=600, column_config=col_cfg)
-
+    
             col1, col2 = st.columns(2)
             with col1:
                 st.download_button(
-                    "Baixar CSV",
+                    "Baixar CSV (Cuenta consolidada)",
                     df.to_csv(index=False).encode("utf-8"),
-                    "cuenta.csv",
+                    "cuenta_consolidada.csv",
                     "text/csv",
                     use_container_width=True
                 )
@@ -1270,9 +1315,9 @@ def render():
                     date_cols=date_cols
                 )
                 st.download_button(
-                    "Baixar XLSX",
+                    "Baixar XLSX (Cuenta consolidada)",
                     xlsx_bytes,
-                    "cuenta.xlsx",
+                    "cuenta_consolidada.xlsx",
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
