@@ -565,7 +565,7 @@ def render():
         except Exception as e:
             st.error("Erro durante a limpeza da Plantilla de Gastos.")
             st.exception(e)
-
+        st.stop()
     # -------------------------------------------------------------------------
     # Modo: Estado de Cuenta (.txt)
     # -------------------------------------------------------------------------
