@@ -59,6 +59,35 @@ def _fmt_num_2dec_point(value) -> str:
 def _str_or_empty(x) -> str:
     return "" if x is None or (isinstance(x, float) and np.isnan(x)) else str(x).strip()
 
+def _fmt_transno_keep_zeros(x, width: int = 9) -> str:
+    """
+    Normaliza 'TransactionNo'/'Transacción' para apenas dígitos e zera à esquerda
+    até 'width' casas. Ex.: 18528 -> 000018528 (width=9).
+    Trata corretamente leituras como 18528.0 (float) e strings com texto.
+    """
+    if x is None or (isinstance(x, float) and np.isnan(x)):
+        return ""
+    # Numérico puro
+    if isinstance(x, (int, np.integer)):
+        s = str(int(x))
+    elif isinstance(x, (float, np.floating)):
+        s = str(int(round(float(x))))
+    else:
+        s = str(x).strip()
+        s_norm = s.replace(",", ".")
+        # Se parecer float em string (ex.: "18528.0"), converte para int
+        if re.fullmatch(r"\d+\.\d+", s_norm):
+            try:
+                s = str(int(float(s_norm)))
+            except Exception:
+                # fallback: remove não dígitos
+                s = re.sub(r"\D", "", s)
+        else:
+            s = re.sub(r"\D", "", s)
+    if not s:
+        return ""
+    return s.zfill(width)
+
 # -----------------------------------------------------------------------------
 # Limpieza Plantilla Gastos — helper robusto
 # -----------------------------------------------------------------------------
@@ -676,7 +705,9 @@ def render():
             try:
                 name = getattr(uploaded_xl, "name", "").lower()
                 engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
-                df_pg = pd.read_excel(uploaded_xl, sheet_name=0, engine=engine)
+
+                # Lê como texto para preservar zeros à esquerda (vamos converter Amount e datas depois)
+                df_pg = pd.read_excel(uploaded_xl, sheet_name=0, engine=engine, dtype=str)
 
                 # Detecta coluna Amount (case-insensitive)
                 amount_col = None
@@ -737,7 +768,7 @@ def render():
                 amount_col_ci = amount_col
                 
                 tdate_str  = df_pg[tdate_col].apply(_fmt_date_ddmmyyyy) if tdate_col else ""
-                tno_str    = df_pg[tno_col].apply(_str_or_empty) if tno_col else ""
+                tno_str    = df_pg[tno_col].apply(_fmt_transno_keep_zeros) if tno_col else ""
                 cuenta_str = df_pg[cuenta_col].apply(_str_or_empty) if cuenta_col else ""
                 amount_str = df_pg[amount_col_ci].apply(_fmt_num_2dec_point) if amount_col_ci else ""
                 
@@ -1008,7 +1039,7 @@ def render():
             # Campos: CTA, Fecha, Transacción, Saldo Real
             cta_str   = df["CTA"].apply(_str_or_empty) if "CTA" in df.columns else pd.Series([""]*len(df))
             fecha_str = df["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df.columns else pd.Series([""]*len(df))
-            tran_str  = df["Transacción"].apply(_str_or_empty) if "Transacción" in df.columns else pd.Series([""]*len(df))
+            tran_str  = df["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df.columns else pd.Series([""]*len(df))
             sreal_str = df["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df.columns else pd.Series([""]*len(df))
             
             df["Chave"] = cta_str + "|" + fecha_str + "|" + tran_str + "|" + sreal_str
