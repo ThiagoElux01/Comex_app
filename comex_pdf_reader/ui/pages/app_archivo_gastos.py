@@ -404,6 +404,137 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
 
     return df
 
+    def parse_cuenta_gl_multi(texto: str) -> pd.DataFrame:
+        """
+        Parser para arquivos GL0061 contendo MULTIPLAS contas.
+        Lógica:
+          - A conta aparece 1 linha acima de 'Saldo Inicial'
+          - Conta = primeiros 1 a 6 dígitos da linha
+          - O bloco vai até 'Para período'
+          - Ignorar movimentos cujo SALDO esteja vazio
+          - Mantém lógica do parser original (Debe/Haber negativos com '-', datas, etc.)
+        """
+        linhas = texto.splitlines()
+        dados = []
+    
+        # Regex para identificar número final negativo tipo "9,200.29-"
+        def clean_num(v):
+            if not v:
+                return 0.0
+            s = str(v).strip()
+            neg = s.endswith("-")
+            if neg:
+                s = s[:-1]
+            s = s.replace(",", "")
+            try:
+                val = float(s)
+            except:
+                val = 0.0
+            return -val if neg else val
+    
+        # Detecta início de conta:
+        # "Saldo Inicial" → linha acima tem a conta
+        # conta = primeiros 1 a 6 dígitos
+        def extrair_conta(linha):
+            m = re.match(r"\s*(\d{1,6})", linha)
+            return m.group(1) if m else None
+    
+        idx = 0
+        n = len(linhas)
+    
+        while idx < n:
+            ln = linhas[idx]
+    
+            # Encontrou "Saldo Inicial"
+            if "Saldo Inicial" in ln:
+                if idx == 0:
+                    idx += 1
+                    continue
+    
+                # A linha da conta está logo acima:
+                linha_conta = linhas[idx - 1].strip()
+                conta = extrair_conta(linha_conta)
+                if not conta:
+                    idx += 1
+                    continue
+    
+                # Agora varremos o bloco até "Para período"
+                idx += 1
+                while idx < n and "Para período" not in linhas[idx]:
+                    l = linhas[idx].rstrip()
+    
+                    # Identificar linha de movimento pelo padrão de data dd/mm/aa
+                    if re.search(r"\d{2}/\d{2}/\d{2}", l):
+    
+                        # Extração: CC, PROD, CNT, TDW, Fecha, Transacción
+                        try:
+                            cc = l[0:5].strip()
+                            prod = l[5:13].strip()
+                            cnt = l[13:23].strip()
+                            tdw = l[23:31].strip()
+                            fecha = l[31:40].strip()
+                            ntran = l[40:50].strip()
+                        except:
+                            idx += 1
+                            continue
+    
+                        # Números da linha (Debe, Haber, Saldo)
+                        nums = re.findall(r"[-\d,]+\.\d{2}-?", l)
+                        if len(nums) < 3:
+                            idx += 1
+                            continue
+    
+                        debe = clean_num(nums[-3])
+                        haber = clean_num(nums[-2])
+                        saldo_impresso = clean_num(nums[-1])
+    
+                        # Ignorar linhas sem saldo
+                        if saldo_impresso is None:
+                            idx += 1
+                            continue
+    
+                        # Texto está depois do último número
+                        pos = l.rfind(nums[-1])
+                        texto_mov = l[pos + len(nums[-1]):].strip() if pos != -1 else ""
+    
+                        # Saldo Real do movimento
+                        saldo_real = round(debe - haber, 2)
+    
+                        # Guardar
+                        dados.append([
+                            conta, cc, prod, cnt, tdw,
+                            fecha, ntran,
+                            debe, haber,
+                            saldo_real, saldo_impresso,
+                            texto_mov
+                        ])
+    
+                    idx += 1
+            idx += 1
+    
+        # Montar DF
+        cols = [
+            "CTA", "CC", "PROD", "CNT", "TDW",
+            "Fecha", "Transacción",
+            "Debe", "Haber",
+            "Saldo Real", "Saldo",
+            "Texto"
+        ]
+        df = pd.DataFrame(dados, columns=cols)
+    
+        # Converter datas
+        if "Fecha" in df.columns:
+            df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce", dayfirst=True).dt.date
+    
+        # Criar coluna "Chave" no mesmo padrão do parser original
+        df["Chave"] = (
+            df["CTA"].astype(str) + "|" +
+            df["Fecha"].apply(lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else "") + "|" +
+            df["Transacción"].apply(lambda x: _fmt_transno_keep_zeros(x)) + "|" +
+            df["Saldo Real"].apply(lambda x: _fmt_num_2dec_point(x))
+        )
+    
+        return df
 
 # -----------------------------------------------------------------------------
 # Export XLSX com máscara numérica e data
@@ -1223,6 +1354,36 @@ def render():
     elif mode == "cuenta":
         st.subheader("📘 Importar Archivo de Cuenta (GL0061)")
 
+        st.markdown("### 🆕 Modo Multi-Conta (arquivo único com todas as contas)")
+
+        multi_file = st.file_uploader(
+            "Selecionar arquivo GL0061 (multi-contas)",
+            type=["txt"],
+            key="upl_multi_cuenta"
+        )
+        
+        if st.button("▶️ Processar Multi-Conta", use_container_width=True):
+            if multi_file is None:
+                st.warning("Selecione um arquivo primeiro.")
+            else:
+                raw = multi_file.getvalue()
+                try:
+                    try:
+                        text = raw.decode("utf-8")
+                    except:
+                        text = raw.decode("latin-1")
+        
+                    df_multi = parse_cuenta_gl_multi(text)
+                    df_multi["Arquivo"] = getattr(multi_file, "name", "")
+        
+                    # Guarda no mesmo lugar para reuso nas outras telas
+                    st.session_state["aag_cuenta_df"] = df_multi.copy()
+        
+                    st.success(f"Arquivo multi-conta processado com sucesso! {len(df_multi):,} linhas.")
+                except Exception as e:
+                    st.error("Erro ao processar arquivo multi-conta.")
+                    st.exception(e)
+                    
         upl_key = st.session_state["aag_state"].setdefault("uploader_key_cuenta", "aag_cuenta_upl_1")
         uploaded = st.file_uploader("Selecionar arquivo GL0061 (.txt)", type=["txt"], key=upl_key,accept_multiple_files=True)
 
