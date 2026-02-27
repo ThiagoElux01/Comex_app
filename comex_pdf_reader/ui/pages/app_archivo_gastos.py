@@ -824,20 +824,6 @@ def render():
                     mime="text/csv",
                     use_container_width=True,
                 )
-            with col_xlsx:
-                xlsx_bytes = to_xlsx_bytes_format(
-                    df_pg,
-                    sheet_name="PlantillaGastos",
-                    numeric_cols=[amount_col_view] if amount_col_view else [],
-                    date_cols=[c for c in df_pg.columns if pd.api.types.is_datetime64_any_dtype(df_pg[c]) or c in found_date_cols_view],
-                )
-                st.download_button(
-                    label="Baixar XLSX (Plantilla Gastos)",
-                    data=xlsx_bytes,
-                    file_name="plantilla_gastos.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                )
 
     # -------------------------------------------------------------------------
     # Modo: Analise — compara Estado de Cuenta (CTA/Período) x Plantilla (Cuenta/Amount)
