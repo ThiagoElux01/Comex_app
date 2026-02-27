@@ -6,7 +6,7 @@ import pandas as pd
 from io import BytesIO
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Font
-from pandas.api.types import is_numeric_dtype  # <-- adicionado
+from pandas.api.types import is_numeric_dtype
 
 # -----------------------------------------------------------------------------
 # Estado e helpers
@@ -42,7 +42,7 @@ def _fmt_date_ddmmyyyy(value) -> str:
     if pd.isna(value):
         return ""
     try:
-        dt = pd.to_datetime(value, dayfirst=True, errors="coerce")
+        dt = pd.to_datetime(value, errors="coerce")  # formato ISO já é entendido
         if pd.isna(dt):
             return ""
         return dt.strftime("%d/%m/%Y")
@@ -68,7 +68,6 @@ def _fmt_transno_keep_zeros(x, width: int = 9) -> str:
     """
     if x is None or (isinstance(x, float) and np.isnan(x)):
         return ""
-    # Numérico puro
     if isinstance(x, (int, np.integer)):
         s = str(int(x))
     elif isinstance(x, (float, np.floating)):
@@ -76,12 +75,10 @@ def _fmt_transno_keep_zeros(x, width: int = 9) -> str:
     else:
         s = str(x).strip()
         s_norm = s.replace(",", ".")
-        # Se parecer float em string (ex.: "18528.0"), converte para int
         if re.fullmatch(r"\d+\.\d+", s_norm):
             try:
                 s = str(int(float(s_norm)))
             except Exception:
-                # fallback: remove não dígitos
                 s = re.sub(r"\D", "", s)
         else:
             s = re.sub(r"\D", "", s)
@@ -89,62 +86,47 @@ def _fmt_transno_keep_zeros(x, width: int = 9) -> str:
         return ""
     return s.zfill(width)
 
-# ==== Helpers robustos para datas (Excel serial + strings) ====
+# ==== Helpers robustos para datas na PLANTILLA ====
 _EXCEL_ORIGIN = "1899-12-30"  # origem do Excel (Windows)
 
-def _coerce_excel_serial_to_date(s: pd.Series) -> pd.Series:
-    """Converte valores numéricos (seriais do Excel) para datetime.date."""
-    s_num = pd.to_numeric(s, errors="coerce")
-    dt = pd.to_datetime(s_num, unit="d", origin=_EXCEL_ORIGIN, errors="coerce")
-    return dt.dt.date
-
-def _coerce_str_to_date_dayfirst(s: pd.Series) -> pd.Series:
+def _to_datetime_from_mixed_excel_and_strings(s: pd.Series) -> pd.Series:
     """
-    Converte strings tentando interpretar como dia/mês/ano (dayfirst=True).
-    Faz um segundo passe apenas onde houver NaT.
+    Converte coluna de datas da Plantilla de Gastos para dtype datetime64[ns],
+    tratando 3 casos:
+      1) seriais Excel (número puro ou string numérica) -> origin 1899-12-30
+      2) strings ISO (ex.: '2026-01-02 00:00:00') -> pd.to_datetime padrão
+      3) outras strings -> tentativa genérica de parse
     """
-    s_str = s.astype(str).str.strip()
-    dt1 = pd.to_datetime(s_str, errors="coerce", dayfirst=True, infer_datetime_format=True)
-    mask_nan = dt1.isna()
-    if mask_nan.any():
-        s_amb = s_str[mask_nan]
-        dt2 = pd.to_datetime(s_amb, errors="coerce", dayfirst=True, infer_datetime_format=True)
-        dt1.loc[mask_nan] = dt2
-    return dt1.dt.date
-
-def _normalize_date_column(df: pd.DataFrame, col: str) -> pd.Series:
-    """
-    Normaliza a coluna de data vinda da planilha para objetos date,
-    aceitando: serial Excel, strings dd/mm/yyyy, yyyy-mm-dd, mm/dd/yyyy etc.
-    """
-    if col not in df.columns:
-        return pd.Series([pd.NaT] * len(df), index=df.index, dtype="object")
-
-    s = df[col]
-
-    # Caso já venha como datetime/date
-    if pd.api.types.is_datetime64_any_dtype(s) or s.dtype == "datetime64[ns]":
-        return pd.to_datetime(s, errors="coerce", dayfirst=True).dt.date
-
-    # Se vier numérico puro
-    if is_numeric_dtype(s):
-        return _coerce_excel_serial_to_date(s)
-
-    # Pode ser string numérica (serial Excel) misturada com strings de data
+    # 1) Tenta converter seriais (numérico)
     s_str = s.astype(str).str.strip()
     is_num_like = s_str.str.match(r"^\d+(\.\d+)?$").fillna(False)
+    dt = pd.Series(pd.NaT, index=s.index, dtype="datetime64[ns]")
 
-    out = pd.Series(pd.NaT, index=df.index, dtype="object")
     if is_num_like.any():
-        out[is_num_like] = _coerce_excel_serial_to_date(s_str[is_num_like])
-    if (~is_num_like).any():
-        out[~is_num_like] = _coerce_str_to_date_dayfirst(s_str[~is_num_like])
+        s_num = pd.to_numeric(s_str[is_num_like], errors="coerce")
+        dt.loc[is_num_like] = pd.to_datetime(s_num, unit="d", origin=_EXCEL_ORIGIN, errors="coerce")
 
-    return out
+    # 2) Para o restante, remove o sufixo ' HH:MM:SS' se existir e faz parse padrão
+    rest = ~is_num_like
+    if rest.any():
+        s_rem = s_str[rest].str.replace(r"\s+\d{2}:\d{2}:\d{2}$", "", regex=True)
+        # Primeiro passe: pd.to_datetime padrão (ISO funciona direto)
+        dt1 = pd.to_datetime(s_rem, errors="coerce")
+        dt.loc[rest] = dt1
+
+        # Fallback (pouco provável aqui): tenta mais uma vez
+        still = dt1.isna()
+        if still.any():
+            s2 = s_rem[still]
+            dt2 = pd.to_datetime(s2, errors="coerce")
+            dt.loc[s2.index] = dt2
+
+    return dt
+
 
 def _fmt_date_series_ddmmyyyy(s: pd.Series) -> pd.Series:
-    """Formata uma Series de datas em 'dd/mm/yyyy' (string), preservando vazios."""
-    s_dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
+    """Formata uma Series de datas em 'dd/mm/yyyy' como texto para compor a Chave."""
+    s_dt = pd.to_datetime(s, errors="coerce")
     return s_dt.dt.strftime("%d/%m/%Y").fillna("")
 
 # -----------------------------------------------------------------------------
@@ -167,13 +149,12 @@ def limpiar_plantilla_contra_cuenta(
     if chave_col not in df_cuenta.columns:
         raise ValueError("Cuenta (GL0061) não contém a coluna 'Chave'. Rode a etapa de Cuenta antes.")
 
-    # --- Normalização robusta das chaves (elimina diferenças invisíveis) ---
     def _norm_key_series(s: pd.Series) -> pd.Series:
         return (
             s.astype(str)
-             .str.replace("\u2212", "-", regex=False)  # minus unicode → "-"
-             .str.replace("\xa0", " ", regex=False)    # NBSP → espaço normal
-             .str.replace(r"\s+", " ", regex=True)     # múltiplos espaços → 1
+             .str.replace("\u2212", "-", regex=False)
+             .str.replace("\xa0", " ", regex=False)
+             .str.replace(r"\s+", " ", regex=True)
              .str.strip()
         )
 
@@ -182,14 +163,11 @@ def limpiar_plantilla_contra_cuenta(
     df_pg["_key_norm"] = _norm_key_series(df_pg[chave_col])
     df_cuenta["_key_norm"] = _norm_key_series(df_cuenta[chave_col])
 
-    # Para exibir nos detalhes, guarda a 1ª forma original por chave normalizada
     first_original_key = df_pg.groupby("_key_norm")[chave_col].first()
 
-    # Contagens por chave normalizada
     cnt_pg = df_pg["_key_norm"].value_counts()
     cnt_cuenta = df_cuenta["_key_norm"].value_counts()
 
-    # Somas por chave (para guard)
     amount_col = None
     for c in df_pg.columns:
         cl = str(c).strip().lower()
@@ -205,19 +183,13 @@ def limpiar_plantilla_contra_cuenta(
     if cuenta_amt_col is not None:
         sum_cuenta = pd.to_numeric(df_cuenta[cuenta_amt_col], errors="coerce").groupby(df_cuenta["_key_norm"]).sum(min_count=1)
 
-    # Limite de ocorrências (por chave) permitidas na Plantilla = contagem na Cuenta
     keep_limit_map = cnt_cuenta.to_dict()
 
-    # Ranking estável por chave na Plantilla
     rank = df_pg.groupby("_key_norm").cumcount() + 1
     keep_limit = df_pg["_key_norm"].map(keep_limit_map)
 
-    # Mantém:
-    # - chaves NÃO presentes na Cuenta (keep_limit NaN)
-    # - para as presentes, até o limite
     mask_keep = keep_limit.isna() | (rank <= keep_limit.fillna(np.inf))
 
-    # Guard: se contagem e soma batem, preserva tudo daquela chave
     if not sum_pg.empty and not sum_cuenta.empty:
         keys_ok = []
         for k, cpg in cnt_pg.items():
@@ -230,11 +202,9 @@ def limpiar_plantilla_contra_cuenta(
         if keys_ok:
             mask_keep = mask_keep | df_pg["_key_norm"].isin(keys_ok)
 
-    # Resultado
     df_clean = df_pg[mask_keep].copy().reset_index(drop=True)
     df_clean.drop(columns=["_key_norm"], inplace=True, errors="ignore")
 
-    # Estatísticas
     removed_total = int((~mask_keep).sum())
     removed_by_key = {}
     keys_with_drop = []
@@ -242,7 +212,7 @@ def limpiar_plantilla_contra_cuenta(
         cct = int(cnt_cuenta.get(k, 0))
         if cpg > cct and cct > 0:
             diff = cpg - cct
-            k_disp = str(first_original_key.get(k, k))  # forma original para exibição
+            k_disp = str(first_original_key.get(k, k))
             removed_by_key[k_disp] = diff
             keys_with_drop.append(k)
 
@@ -283,7 +253,6 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
     """
     linhas = texto.splitlines()
 
-    # Encontrar início após o cabeçalho (linha que contém "CTA Descripción")
     start_idx = 0
     for i, ln in enumerate(linhas):
         if "CTA" in ln and "Descripci" in ln:
@@ -297,7 +266,6 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
         raw = ln.rstrip()
         if not raw:
             continue
-        # Ignora separadores e cabeçalho/rodapé
         if set(raw.strip()) in [{"="}, {"-"}] or "Scala" in raw or "Electrolux" in raw:
             continue
 
@@ -305,24 +273,20 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
         if not m:
             continue
 
-        # Parte à esquerda dos 4 números
         left = raw[: m.start()].rstrip()
         if not left:
             continue
 
-        # CTA = primeiro token; Descripción = resto
         parts = left.split()
         cta = parts[0] if parts else ""
         descr = left[len(cta):].strip() if parts else left.strip()
 
-        # Extrai e normaliza números
         sal_ob, saldo_ob, periodo, saldo_cb = (_clean_num(x) for x in m.groups())
         dados.append([cta, descr, sal_ob, saldo_ob, periodo, saldo_cb])
 
     cols = ["CTA", "Descripción", "Sal OB", "Saldo OB", "Período", "Saldo CB"]
     df = pd.DataFrame(dados, columns=cols)
 
-    # Tipos numéricos garantidos
     for c in ["Sal OB", "Saldo OB", "Período", "Saldo CB"]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
@@ -330,6 +294,7 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
 # -----------------------------------------------------------------------------
 # PARSER GL0061 — colunas fixas
 # -----------------------------------------------------------------------------
+
 def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     """
     Parser para arquivos GL0061 (colunas fixas em linha), com:
@@ -341,7 +306,6 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     linhas = texto.splitlines()
     dados = []
 
-    # Encontrar CTA no cabeçalho (ex.: "Nº de cta. 123456")
     cta_header = None
     reg_header = re.compile(r"Nº de cta\.\s+(\d{6})")
     for ln in linhas[:50]:
@@ -352,7 +316,6 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     if not cta_header:
         raise ValueError("CTA não encontrada no cabeçalho do arquivo GL0061.")
 
-    # Conversor numérico que entende "9,200.29-" como negativo
     def clean_num(v: str | None) -> float:
         if not v:
             return 0.0
@@ -388,7 +351,6 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
         if not re.search(r"\d{2}/\d{2}/\d{2}", ln):
             continue
 
-        # Offsets conforme layout fixo do GL0061 (ajuste se necessário)
         cc     = ln[0:5].strip()
         prod   = ln[5:13].strip()
         cnt    = ln[13:23].strip()
@@ -396,8 +358,6 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
         fecha  = ln[31:40].strip()
         ntran  = ln[40:50].strip()
 
-        # Últimos 3 números = Debe, Haber, Saldo impresso
-        # Agora aceita negativo com traço no FINAL (ex.: 9,200.29-)
         nums = re.findall(r"[-\d,]+\.\d{2}-?", ln)
         if len(nums) < 3:
             continue
@@ -406,10 +366,8 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
         haber = clean_num(nums[-2])
         saldo_impresso = clean_num(nums[-1])
 
-        # Saldo Real = Debe - Haber (mantendo sinais reais)
         saldo_real = round(debe - haber, 2)
 
-        # Texto após o saldo impresso
         texto_pos = ln.rfind(nums[-1])
         texto = ln[texto_pos + len(nums[-1]):].strip() if texto_pos != -1 else ""
 
@@ -425,7 +383,6 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
 
     df = pd.DataFrame(dados, columns=cols)
 
-    # Ajuste de data
     for date_col in ["Fecha", "Fechado"]:
         if date_col in df.columns:
             df[date_col] = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True).dt.date
@@ -435,6 +392,7 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
 # -----------------------------------------------------------------------------
 # Export XLSX com máscara numérica e data
 # -----------------------------------------------------------------------------
+
 def to_xlsx_bytes_format(
     df: pd.DataFrame,
     sheet_name: str,
@@ -459,7 +417,6 @@ def to_xlsx_bytes_format(
         df_to_save.to_excel(writer, index=False, sheet_name=sheet_name)
         ws = writer.book[sheet_name]
 
-        # Estilos de cabeçalho
         BLUE = "FF0077B6"
         WHITE = "FFFFFFFF"
         fill_blue = PatternFill(fill_type="solid", start_color=BLUE, end_color=BLUE)
@@ -468,7 +425,6 @@ def to_xlsx_bytes_format(
             cell.fill = fill_blue
             cell.font = font_white_bold
 
-        # Formatação numérica
         for col_name in numeric_cols:
             if col_name not in df_to_save.columns:
                 continue
@@ -478,7 +434,6 @@ def to_xlsx_bytes_format(
                 if isinstance(cell.value, (int, float)) and cell.value is not None:
                     cell.number_format = '#,##0.00'
 
-        # Formatação de data
         for col_name in date_cols:
             if col_name not in df_to_save.columns:
                 continue
@@ -488,7 +443,6 @@ def to_xlsx_bytes_format(
                 if cell.value:
                     cell.number_format = 'dd/mm/yyyy'
 
-        # Ajuste de largura
         for col_idx in range(1, ws.max_column + 1):
             max_len = 10
             for row in range(1, ws.max_row + 1):
@@ -508,32 +462,27 @@ def to_xlsx_bytes_format(
 # -----------------------------------------------------------------------------
 # Página
 # -----------------------------------------------------------------------------
+
 def render():
     _ensure_state()
     st.subheader("Aplicación Archivo Gastos")
 
-    # Botões principais (agora com CUENTA + Limpieza)
     col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns(5)
 
-    # ✅ garante variável definida, evitando NameError
     limpeza_pg_clicked = False
 
     with col_b1:
         if st.button("Estado de Cuenta", use_container_width=True):
             _set_mode("estado")
-    
     with col_b2:
         if st.button("Plantilla Gastos", use_container_width=True):
             _set_mode("plantilla")
-    
     with col_b3:
         if st.button("Analise", use_container_width=True):
             _set_mode("asientos")
-    
     with col_b4:
         if st.button("Cuenta", use_container_width=True):
             _set_mode("cuenta")
-
     with col_b5:
         if st.button("Limpieza Plantilla Gastos", use_container_width=True):
             limpeza_pg_clicked = True
@@ -541,7 +490,7 @@ def render():
     mode = st.session_state["aag_mode"]
     st.divider()
 
-    # ====== AÇÃO: Limpieza Plantilla Gastos (global, independente da aba) ======
+    # ====== AÇÃO: Limpieza Plantilla Gastos ======
     if limpeza_pg_clicked:
         st.subheader("🧹 Limpieza da Plantilla de Gastos")
         try:
@@ -553,14 +502,10 @@ def render():
             elif df_ct is None or df_ct.empty:
                 st.error("Antes de limpar, carregue e processe o **Archivo de Cuenta (GL0061)**.")
             else:
-                # Executa limpeza baseada nas chaves da Cuenta
                 df_pg_clean, stats = limpiar_plantilla_contra_cuenta(df_pg, df_ct, chave_col="Chave")
-
-                # Atualiza a sessão com a versão limpa
                 st.session_state["aag_plantilla_df"] = df_pg_clean.copy()
                 st.session_state["aag_state"]["last_action"] = "limpieza_pg"
 
-                # Métricas e resumo
                 c1, c2, c3, c4 = st.columns(4)
                 with c1:
                     st.metric("Linhas (Original)", f"{stats['rows_original']:,}".replace(",", "."))
@@ -580,11 +525,9 @@ def render():
                         ).sort_values(by="Removidas", ascending=False)
                         st.dataframe(det, use_container_width=True, height=280)
 
-                # Prévia e downloads do resultado limpo
                 st.caption("Prévia da Plantilla de Gastos (após limpeza):")
                 df_pg_prev = st.session_state["aag_plantilla_df"]
 
-                # Detecta colunas para formatação no download
                 amount_col_view = None
                 for c in df_pg_prev.columns:
                     if str(c).strip().lower() == "amount":
@@ -602,7 +545,10 @@ def render():
                 if amount_col_view:
                     col_cfg[str(amount_col_view)] = st.column_config.NumberColumn(format="%.2f")
                 for dc in found_date_cols_view:
-                    col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
+                    if pd.api.types.is_datetime64_any_dtype(df_pg_prev[dc]):
+                        col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
+                    else:
+                        col_cfg[dc] = st.column_config.TextColumn()
 
                 st.dataframe(df_pg_prev, use_container_width=True, height=520, column_config=col_cfg)
 
@@ -661,7 +607,6 @@ def render():
                 del st.session_state["aag_estado_df"]
             st.rerun()
 
-        # Se clicou em Executar com arquivo -> processa e salva
         if run_clicked and uploaded is not None:
             pbar = st.progress(0, text="Lendo arquivo .txt...")
             try:
@@ -679,7 +624,6 @@ def render():
                     pbar.progress(0, text="Aguardando...")
                     return
 
-                # Salva o DF base (sem a linha TOTAL) para uso na aba Analise
                 st.session_state["aag_estado_df"] = df_base.copy()
 
                 pbar.progress(70, text="Preparando visualização...")
@@ -689,7 +633,6 @@ def render():
                 st.error("Erro ao processar o arquivo .txt.")
                 st.exception(e)
 
-        # Exibição (com linha TOTAL)
         if "aag_estado_df" in st.session_state and isinstance(st.session_state["aag_estado_df"], pd.DataFrame):
             df_base = st.session_state["aag_estado_df"]
 
@@ -765,7 +708,7 @@ def render():
                 name = getattr(uploaded_xl, "name", "").lower()
                 engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
 
-                # Lê como texto para preservar zeros à esquerda (vamos converter Amount e datas depois)
+                # Lê como texto para preservar zeros à esquerda (Amount e datas tratadas depois)
                 df_pg = pd.read_excel(uploaded_xl, sheet_name=0, engine=engine, dtype=str)
 
                 # Detecta coluna Amount (case-insensitive)
@@ -778,7 +721,6 @@ def render():
                     candidates = [c for c in df_pg.columns if "amount" in str(c).strip().lower()]
                     if candidates:
                         amount_col = candidates[0]
-
                 if amount_col is None:
                     st.error("Coluna 'Amount' não encontrada no arquivo.")
                     return
@@ -786,25 +728,11 @@ def render():
                 # Amount numérico
                 df_pg[amount_col] = pd.to_numeric(df_pg[amount_col], errors="coerce")
 
-                # Helper para achar colunas por variações de nome
-                def _find_col_ci(df: pd.DataFrame, targets: list[str]):
-                    cols_map = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in df.columns}
-                    for t in targets:
-                        key = re.sub(r"[^a-z0-9]", "", t.lower())
-                        if key in cols_map:
-                            return cols_map[key]
-                    return None
-
-                # Colunas principais para compor a 'Chave'
-                cuenta_col    = _find_col_ci(df_pg, ["Cuenta"])
-                tno_col       = _find_col_ci(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
-                amount_col_ci = amount_col
-
-                # --- Normalização robusta das colunas de data ---
+                # --- Normalização de datas APENAS na Plantilla (forçar dd/mm/yyyy na Chave) ---
                 def norm(s: str) -> str:
                     return re.sub(r"[^a-z0-9]", "", str(s).strip().lower())
 
-                # Aceita variações: TransactionDate, DueDate/Due Date, InvoiceDate/Invoice Date
+                # Localiza colunas alvo
                 date_targets = {"transactiondate": None, "duedate": None, "invoicedate": None}
                 for c in df_pg.columns:
                     nc = norm(c)
@@ -818,10 +746,24 @@ def render():
                 found_date_cols = []
                 for key, col in date_targets.items():
                     if col and col in df_pg.columns:
-                        df_pg[col] = _normalize_date_column(df_pg, col)  # vira objetos date
+                        # Converte qualquer mistura (serial Excel, '2026-01-02 00:00:00', etc.) -> datetime64[ns]
+                        df_pg[col] = _to_datetime_from_mixed_excel_and_strings(df_pg[col])
                         found_date_cols.append(col)
 
-                # Criar 'Chave' na Plantilla (datas sempre em dd/mm/aaaa)
+                # Helper para achar colunas por variações de nome
+                def _find_col_ci(df: pd.DataFrame, targets: list[str]):
+                    cols_map = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in df.columns}
+                    for t in targets:
+                        key = re.sub(r"[^a-z0-9]", "", t.lower())
+                        if key in cols_map:
+                            return cols_map[key]
+                    return None
+
+                cuenta_col    = _find_col_ci(df_pg, ["Cuenta"])
+                tno_col       = _find_col_ci(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
+                amount_col_ci = amount_col
+
+                # Formata data da CHAVE explicitamente em dd/mm/yyyy
                 tdate_col = date_targets.get("transactiondate")
                 tdate_str = _fmt_date_series_ddmmyyyy(df_pg[tdate_col]) if tdate_col else pd.Series([""] * len(df_pg))
 
@@ -866,7 +808,10 @@ def render():
             if amount_col_view:
                 col_cfg[str(amount_col_view)] = st.column_config.NumberColumn(format="%.2f")
             for dc in found_date_cols_view:
-                col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
+                if pd.api.types.is_datetime64_any_dtype(df_pg[dc]):
+                    col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
+                else:
+                    col_cfg[dc] = st.column_config.TextColumn()
 
             st.dataframe(df_pg, use_container_width=True, height=550, column_config=col_cfg)
 
@@ -1093,7 +1038,6 @@ def render():
                 st.error("Nenhuma linha reconhecida no arquivo GL0061.")
                 return
 
-            # Campos: CTA, Fecha, Transacción, Saldo Real
             cta_str   = df["CTA"].apply(_str_or_empty) if "CTA" in df.columns else pd.Series([""]*len(df))
             fecha_str = df["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df.columns else pd.Series([""]*len(df))
             tran_str  = df["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df.columns else pd.Series([""]*len(df))
