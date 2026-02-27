@@ -1,20 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-Aplicación Archivo Gastos (Streamlit)
-
-Ajustes solicitados por Thiago:
-- No botão "Limpieza Plantilla Gastos":
-  * Remover o expander "Ver detalhes por chave (quantidade removida)".
-  * Remover a métrica "Chaves Ajustadas".
-  * Exibir um dataframe baseado no Estado de Cuenta com colunas [CTA, Descripción, Período]
-    + uma nova coluna "Período Ajustado" (SUMIF da Plantilla LIMPA por Cuenta → soma de Amount).
-  * Manter métricas: Linhas (Original), Linhas (Limpo), Removidas.
-  * Manter o download do CSV da Plantilla Limpa.
-
-Observação: Este arquivo contém todo o código original fornecido, com correções de sintaxe
-(->, >, <) e a nova lógica no bloco `if limpeza_pg_clicked:`.
-"""
-
 import re
 import numpy as np
 import streamlit as st
@@ -538,63 +522,37 @@ def render():
         try:
             df_pg_orig = st.session_state.get("aag_plantilla_df_orig", None)
             df_ct = st.session_state.get("aag_cuenta_df", None)
-            df_ec = st.session_state.get("aag_estado_df", None)
 
             if df_pg_orig is None or df_pg_orig.empty:
                 st.error("Antes de limpar, carregue e execute a **Plantilla de Gastos**.")
-                st.stop()
-            if df_ct is None or df_ct.empty:
+            elif df_ct is None or df_ct.empty:
                 st.error("Antes de limpar, carregue e processe o **Archivo de Cuenta (GL0061)**.")
-                st.stop()
-
-            # ---- LIMPEZA REAL ----
-            df_pg_clean, stats = limpiar_plantilla_contra_cuenta(df_pg_orig, df_ct, chave_col="Chave")
-            st.session_state["aag_plantilla_df_clean"] = df_pg_clean.copy()
-            st.session_state["aag_state"]["last_action"] = "limpieza_pg"
-
-            # =============================
-            #    NOVA APRESENTAÇÃO (PEDIDO)
-            # =============================
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.metric("Linhas (Original)", f"{stats['rows_original']:,}".replace(",", "."))
-            with c2:
-                st.metric("Linhas (Limpo)", f"{stats['rows_clean']:,}".replace(",", "."))
-            with c3:
-                st.metric("Removidas", f"{stats['rows_removed']:,}".replace(",", "."))
-
-            # Download da Plantilla Limpa (mantido)
-            df_pg_prev = st.session_state["aag_plantilla_df_clean"]
-            col_csv, _ = st.columns([1,1])
-            with col_csv:
-                st.download_button(
-                    "Baixar CSV (Plantilla Limpia)",
-                    df_pg_prev.to_csv(index=False).encode("utf-8"),
-                    "plantilla_gastos_limpia.csv",
-                    "text/csv",
-                    use_container_width=True
-                )
-
-            # ====== SUMIF: Estado de Cuenta + Período Ajustado ======
-            if df_ec is None or df_ec.empty:
-                st.warning("Estado de Cuenta ainda não foi carregado. Carregue-o para ver o ajuste por Período.")
             else:
-                # Cópia e normalização da EC
-                df_ec_view = df_ec.copy()
-                df_ec_view["CTA"] = df_ec_view["CTA"].astype(str).str.replace(r"\D", "", regex=True)
-                df_ec_view["CTA"] = df_ec_view["CTA"].str.lstrip("0")
-                df_ec_view.loc[df_ec_view["CTA"] == "", "CTA"] = None
-                df_ec_view["Período"] = pd.to_numeric(df_ec_view["Período"], errors="coerce").fillna(0.0)
-                df_ec_view = df_ec_view[["CTA", "Descripción", "Período"]]
+                df_pg_clean, stats = limpiar_plantilla_contra_cuenta(df_pg_orig, df_ct, chave_col="Chave")
+                st.session_state["aag_plantilla_df_clean"] = df_pg_clean.copy()
+                st.session_state["aag_state"]["last_action"] = "limpieza_pg"
 
-                # Detecta colunas Cuenta e Amount na Plantilla Limpa
-                def _find_col_ci(df: pd.DataFrame, targets: list[str]):
-                    cols_map = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in df.columns}
-                    for t in targets:
-                        key = re.sub(r"[^a-z0-9]", "", t.lower())
-                        if key in cols_map:
-                            return cols_map[key]
-                    return None
+                c1, c2, c3, c4 = st.columns(4)
+                with c1:
+                    st.metric("Linhas (Original)", f"{stats['rows_original']:,}".replace(",", "."))
+                with c2:
+                    st.metric("Linhas (Limpo)", f"{stats['rows_clean']:,}".replace(",", "."))
+                with c3:
+                    st.metric("Removidas", f"{stats['rows_removed']:,}".replace(",", "."))
+                with c4:
+                    st.metric("Chaves Ajustadas", f"{stats['keys_with_removal']:,}".replace(",", "."))
+
+                if stats["rows_removed"] == 0:
+                    st.info("Nenhuma divergência de contagem encontrada. Nada foi removido.")
+                else:
+                    with st.expander("Ver detalhes por chave (quantidade removida)"):
+                        det = pd.DataFrame(
+                            [{"Chave": k, "Removidas": v} for k, v in stats["removed_by_key"].items()]
+                        ).sort_values(by="Removidas", ascending=False)
+                        st.dataframe(det, use_container_width=True, height=280)
+
+                # Prévia da Plantilla de Gastos (após limpeza) — SOMENTE nesta aba
+                df_pg_prev = st.session_state["aag_plantilla_df_clean"]
 
                 amount_col_view = None
                 for c in df_pg_prev.columns:
@@ -606,42 +564,26 @@ def render():
                     if candidates:
                         amount_col_view = candidates[0]
 
-                cuenta_col = _find_col_ci(df_pg_prev, ["Cuenta"]) if "Cuenta" in df_pg_prev.columns or any("cuenta" in str(c).lower() for c in df_pg_prev.columns) else None
+                known_date_keys = {"transactiondate", "duedate", "due_date", "invoicedate", "invoice_date"}
+                found_date_cols_view = [c for c in df_pg_prev.columns if c.lower().replace(" ", "_") in known_date_keys]
 
-                if amount_col_view is None or cuenta_col is None:
-                    st.error("Para calcular o 'Período Ajustado', a Plantilla Limpa deve conter as colunas 'Cuenta' e 'Amount'.")
-                else:
-                    df_pg_sum = (
-                        df_pg_prev
-                        .assign(Cuenta=df_pg_prev[cuenta_col].astype(str).str.replace(r"\D", "", regex=True).str.lstrip("0"))
-                    )
-                    df_pg_sum[amount_col_view] = pd.to_numeric(df_pg_sum[amount_col_view], errors="coerce").fillna(0.0)
-                    df_pg_sum = (
-                        df_pg_sum.groupby("Cuenta", as_index=False)[amount_col_view]
-                        .sum(min_count=1)
-                        .rename(columns={amount_col_view: "Período Ajustado"})
-                    )
+                col_cfg = {}
+                if amount_col_view:
+                    col_cfg[str(amount_col_view)] = st.column_config.NumberColumn(format="%.2f")
+                for dc in found_date_cols_view:
+                    if pd.api.types.is_datetime64_any_dtype(df_pg_prev[dc]):
+                        col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
+                    else:
+                        col_cfg[dc] = st.column_config.TextColumn()
 
-                    df_final = df_ec_view.merge(df_pg_sum, left_on="CTA", right_on="Cuenta", how="left")
-                    if "Cuenta" in df_final.columns:
-                        df_final.drop(columns=["Cuenta"], inplace=True)
-                    df_final["Período Ajustado"] = df_final["Período Ajustado"].fillna(0.0)
+                # st.dataframe(df_pg_prev, use_container_width=True, height=520, column_config=col_cfg)
 
-                    st.subheader("📊 Estado de Cuenta com Período Ajustado")
-                    st.dataframe(
-                        df_final,
-                        use_container_width=True,
-                        height=520,
-                        column_config={
-                            "Período": st.column_config.NumberColumn(format="%.2f"),
-                            "Período Ajustado": st.column_config.NumberColumn(format="%.2f"),
-                        },
-                    )
-
+                col_csv, col_xlsx = st.columns(2)
+                with col_csv:
                     st.download_button(
-                        "Baixar CSV (Estado + Período Ajustado)",
-                        df_final.to_csv(index=False).encode("utf-8"),
-                        "estado_cuenta_ajustado.csv",
+                        "Baixar CSV (Plantilla Limpia)",
+                        df_pg_prev.to_csv(index=False).encode("utf-8"),
+                        "plantilla_gastos_limpia.csv",
                         "text/csv",
                         use_container_width=True
                     )
@@ -887,6 +829,8 @@ def render():
                     col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
                 else:
                     col_cfg[dc] = st.column_config.TextColumn()
+
+            # st.dataframe(df_pg, use_container_width=True, height=550, column_config=col_cfg)
 
             col_csv, col_xlsx = st.columns(2)
             with col_csv:
@@ -1149,8 +1093,3 @@ def render():
 
     else:
         st.info("Selecione um modo acima para continuar.")
-
-
-if __name__ == "__main__":
-    # Executa a página caso rodado diretamente (opcional)
-    render()
