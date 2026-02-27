@@ -4,6 +4,5 @@ PAGES = [
     "Home",
     "Aplicación Comex",
     "Aplicación Archivo Gastos",
-    "Asientos Contables",        # ← NOVO
     "Configurações",
 ]
