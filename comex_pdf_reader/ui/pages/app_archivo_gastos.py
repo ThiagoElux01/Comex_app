@@ -1,4 +1,4 @@
-# ui/pages/app_archivo_gastos.py
+# -*- coding: utf-8 -*-
 import re
 import numpy as np
 import streamlit as st
@@ -11,6 +11,7 @@ from pandas.api.types import is_numeric_dtype
 # -----------------------------------------------------------------------------
 # Estado e helpers
 # -----------------------------------------------------------------------------
+
 def _ensure_state():
     """
     Garante que todas as chaves necessárias existam em st.session_state,
@@ -33,10 +34,13 @@ def _ensure_state():
     if "aag_mode" not in st.session_state:
         st.session_state["aag_mode"] = "estado"  # default
 
+
 def _set_mode(mode: str):
     st.session_state["aag_mode"] = mode
 
+
 # ==== Helpers de formatação para 'Chave' ====
+
 def _fmt_date_ddmmyyyy(value) -> str:
     """Converte vários tipos de data para 'dd/mm/aaaa' como string."""
     if pd.isna(value):
@@ -49,6 +53,7 @@ def _fmt_date_ddmmyyyy(value) -> str:
     except Exception:
         return ""
 
+
 def _fmt_num_2dec_point(value) -> str:
     """Formata número com 2 casas, ponto como decimal, sem milhares (ex.: 1234.50)."""
     try:
@@ -57,8 +62,10 @@ def _fmt_num_2dec_point(value) -> str:
     except Exception:
         return ""
 
+
 def _str_or_empty(x) -> str:
     return "" if x is None or (isinstance(x, float) and np.isnan(x)) else str(x).strip()
+
 
 def _fmt_transno_keep_zeros(x, width: int = 9) -> str:
     """
@@ -86,8 +93,10 @@ def _fmt_transno_keep_zeros(x, width: int = 9) -> str:
         return ""
     return s.zfill(width)
 
+
 # ==== Helpers robustos para datas na PLANTILLA ====
 _EXCEL_ORIGIN = "1899-12-30"  # origem do Excel (Windows)
+
 
 def _to_datetime_from_mixed_excel_and_strings(s: pd.Series) -> pd.Series:
     """
@@ -129,9 +138,11 @@ def _fmt_date_series_ddmmyyyy(s: pd.Series) -> pd.Series:
     s_dt = pd.to_datetime(s, errors="coerce")
     return s_dt.dt.strftime("%d/%m/%Y").fillna("")
 
+
 # -----------------------------------------------------------------------------
 # Limpieza Plantilla Gastos — helper robusto
 # -----------------------------------------------------------------------------
+
 def limpiar_plantilla_contra_cuenta(
     df_pg: pd.DataFrame,
     df_cuenta: pd.DataFrame,
@@ -225,10 +236,12 @@ def limpiar_plantilla_contra_cuenta(
     }
     return df_clean, stats
 
+
 # -----------------------------------------------------------------------------
 # Parsers - ESTADO DE CUENTA (.txt)
 # -----------------------------------------------------------------------------
 _NUM = r"(\-?\d[\d,]*\.\d{2}\-?)"  # número com milhares e 2 decimais; pode terminar com '-' (negativo)
+
 
 def _clean_num(s: str) -> float | None:
     """Converte strings como '12,345.67-' em float (negativo)."""
@@ -245,6 +258,7 @@ def _clean_num(s: str) -> float | None:
         return -v if neg else v
     except Exception:
         return None
+
 
 def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
     """
@@ -291,6 +305,7 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
         df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
+
 # -----------------------------------------------------------------------------
 # PARSER GL0061 — colunas fixas
 # -----------------------------------------------------------------------------
@@ -336,10 +351,10 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     )
 
     cols = [
-        "CTA","CC","PROD","CNT","TDW",
-        "Fecha","Transacción",
-        "Debe","Haber",
-        "Saldo Real","Saldo",
+        "CTA", "CC", "PROD", "CNT", "TDW",
+        "Fecha", "Transacción",
+        "Debe", "Haber",
+        "Saldo Real", "Saldo",
         "Texto"
     ]
 
@@ -351,18 +366,18 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
         if not re.search(r"\d{2}/\d{2}/\d{2}", ln):
             continue
 
-        cc     = ln[0:5].strip()
-        prod   = ln[5:13].strip()
-        cnt    = ln[13:23].strip()
-        tdw    = ln[23:31].strip()
-        fecha  = ln[31:40].strip()
-        ntran  = ln[40:50].strip()
+        cc = ln[0:5].strip()
+        prod = ln[5:13].strip()
+        cnt = ln[13:23].strip()
+        tdw = ln[23:31].strip()
+        fecha = ln[31:40].strip()
+        ntran = ln[40:50].strip()
 
         nums = re.findall(r"[-\d,]+\.\d{2}-?", ln)
         if len(nums) < 3:
             continue
 
-        debe  = clean_num(nums[-3])
+        debe = clean_num(nums[-3])
         haber = clean_num(nums[-2])
         saldo_impresso = clean_num(nums[-1])
 
@@ -388,6 +403,7 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
             df[date_col] = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True).dt.date
 
     return df
+
 
 # -----------------------------------------------------------------------------
 # Export XLSX com máscara numérica e data
@@ -459,12 +475,22 @@ def to_xlsx_bytes_format(
     buffer.seek(0)
     return buffer.getvalue()
 
+
 # -----------------------------------------------------------------------------
 # Página
 # -----------------------------------------------------------------------------
 
 def render():
     _ensure_state()
+
+    # --- MIGRAÇÃO: se ainda existir a chave antiga, preserve como "orig" ---
+    if "aag_plantilla_df_orig" not in st.session_state and "aag_plantilla_df" in st.session_state:
+        try:
+            st.session_state["aag_plantilla_df_orig"] = st.session_state["aag_plantilla_df"].copy()
+        except Exception:
+            st.session_state["aag_plantilla_df_orig"] = st.session_state["aag_plantilla_df"]
+        del st.session_state["aag_plantilla_df"]
+
     st.subheader("Aplicación Archivo Gastos")
 
     col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns(5)
@@ -494,16 +520,16 @@ def render():
     if limpeza_pg_clicked:
         st.subheader("🧹 Limpieza da Plantilla de Gastos")
         try:
-            df_pg = st.session_state.get("aag_plantilla_df", None)
+            df_pg_orig = st.session_state.get("aag_plantilla_df_orig", None)
             df_ct = st.session_state.get("aag_cuenta_df", None)
 
-            if df_pg is None or df_pg.empty:
+            if df_pg_orig is None or df_pg_orig.empty:
                 st.error("Antes de limpar, carregue e execute a **Plantilla de Gastos**.")
             elif df_ct is None or df_ct.empty:
                 st.error("Antes de limpar, carregue e processe o **Archivo de Cuenta (GL0061)**.")
             else:
-                df_pg_clean, stats = limpiar_plantilla_contra_cuenta(df_pg, df_ct, chave_col="Chave")
-                st.session_state["aag_plantilla_df"] = df_pg_clean.copy()
+                df_pg_clean, stats = limpiar_plantilla_contra_cuenta(df_pg_orig, df_ct, chave_col="Chave")
+                st.session_state["aag_plantilla_df_clean"] = df_pg_clean.copy()
                 st.session_state["aag_state"]["last_action"] = "limpieza_pg"
 
                 c1, c2, c3, c4 = st.columns(4)
@@ -525,8 +551,8 @@ def render():
                         ).sort_values(by="Removidas", ascending=False)
                         st.dataframe(det, use_container_width=True, height=280)
 
-                #st.caption("Prévia da Plantilla de Gastos (após limpeza):")
-                df_pg_prev = st.session_state["aag_plantilla_df"]
+                # Prévia da Plantilla de Gastos (após limpeza) — SOMENTE nesta aba
+                df_pg_prev = st.session_state["aag_plantilla_df_clean"]
 
                 amount_col_view = None
                 for c in df_pg_prev.columns:
@@ -538,7 +564,7 @@ def render():
                     if candidates:
                         amount_col_view = candidates[0]
 
-                known_date_keys = {"transactiondate","duedate","due_date","invoicedate","invoice_date"}
+                known_date_keys = {"transactiondate", "duedate", "due_date", "invoicedate", "invoice_date"}
                 found_date_cols_view = [c for c in df_pg_prev.columns if c.lower().replace(" ", "_") in known_date_keys]
 
                 col_cfg = {}
@@ -550,7 +576,7 @@ def render():
                     else:
                         col_cfg[dc] = st.column_config.TextColumn()
 
-               # st.dataframe(df_pg_prev, use_container_width=True, height=520, column_config=col_cfg)
+                # st.dataframe(df_pg_prev, use_container_width=True, height=520, column_config=col_cfg)
 
                 col_csv, col_xlsx = st.columns(2)
                 with col_csv:
@@ -566,6 +592,7 @@ def render():
             st.error("Erro durante a limpeza da Plantilla de Gastos.")
             st.exception(e)
         st.stop()
+
     # -------------------------------------------------------------------------
     # Modo: Estado de Cuenta (.txt)
     # -------------------------------------------------------------------------
@@ -684,8 +711,9 @@ def render():
 
         if clear_clicked:
             st.session_state["aag_state"]["uploader_key_pg"] = upl_key_pg + "_x"
-            if "aag_plantilla_df" in st.session_state:
-                del st.session_state["aag_plantilla_df"]
+            for k in ("aag_plantilla_df_orig", "aag_plantilla_df_clean"):
+                if k in st.session_state:
+                    del st.session_state[k]
             st.rerun()
 
         if run_clicked and uploaded_xl is not None:
@@ -745,26 +773,29 @@ def render():
                             return cols_map[key]
                     return None
 
-                cuenta_col    = _find_col_ci(df_pg, ["Cuenta"])
-                tno_col       = _find_col_ci(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
+                cuenta_col = _find_col_ci(df_pg, ["Cuenta"])
+                tno_col = _find_col_ci(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
                 amount_col_ci = amount_col
 
                 # Formata data da CHAVE explicitamente em dd/mm/yyyy
                 tdate_col = date_targets.get("transactiondate")
                 tdate_str = _fmt_date_series_ddmmyyyy(df_pg[tdate_col]) if tdate_col else pd.Series([""] * len(df_pg))
 
-                tno_str    = df_pg[tno_col].apply(_fmt_transno_keep_zeros) if tno_col else ""
+                tno_str = df_pg[tno_col].apply(_fmt_transno_keep_zeros) if tno_col else ""
                 cuenta_str = df_pg[cuenta_col].apply(_str_or_empty) if cuenta_col else ""
                 amount_str = df_pg[amount_col_ci].apply(_fmt_num_2dec_point) if amount_col_ci else ""
 
+                def _ensure_series(x, n):
+                    return x if isinstance(x, pd.Series) else pd.Series([""] * n)
+
                 df_pg["Chave"] = (
-                    (cuenta_str if isinstance(cuenta_str, pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
-                    (tdate_str  if isinstance(tdate_str,  pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
-                    (tno_str    if isinstance(tno_str,    pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
-                    (amount_str if isinstance(amount_str, pd.Series) else pd.Series([""]*len(df_pg)))
+                    _ensure_series(cuenta_str, len(df_pg)) + "|" +
+                    _ensure_series(tdate_str, len(df_pg)) + "|" +
+                    _ensure_series(tno_str, len(df_pg)) + "|" +
+                    _ensure_series(amount_str, len(df_pg))
                 )
 
-                st.session_state["aag_plantilla_df"] = df_pg.copy()
+                st.session_state["aag_plantilla_df_orig"] = df_pg.copy()
 
                 pbar.progress(70, text="Preparando visualização...")
                 st.success("Arquivo carregado com sucesso.")
@@ -774,8 +805,8 @@ def render():
                 st.exception(e)
 
         # Exibição e downloads
-        if "aag_plantilla_df" in st.session_state and isinstance(st.session_state["aag_plantilla_df"], pd.DataFrame):
-            df_pg = st.session_state["aag_plantilla_df"]
+        if "aag_plantilla_df_orig" in st.session_state and isinstance(st.session_state["aag_plantilla_df_orig"], pd.DataFrame):
+            df_pg = st.session_state["aag_plantilla_df_orig"]
 
             amount_col_view = None
             for c in df_pg.columns:
@@ -787,7 +818,7 @@ def render():
                 if candidates:
                     amount_col_view = candidates[0]
 
-            known_date_keys = {"transactiondate","duedate","due_date","invoicedate","invoice_date"}
+            known_date_keys = {"transactiondate", "duedate", "due_date", "invoicedate", "invoice_date"}
             found_date_cols_view = [c for c in df_pg.columns if c.lower().replace(" ", "_") in known_date_keys]
 
             col_cfg = {}
@@ -811,6 +842,9 @@ def render():
                     use_container_width=True,
                 )
 
+            if "aag_plantilla_df_clean" in st.session_state:
+                st.caption("Uma versão **limpa** foi gerada. Para baixá-la, use o botão **Limpieza Plantilla Gastos**.")
+
     # -------------------------------------------------------------------------
     # Modo: Analise — compara Estado de Cuenta (CTA/Período) x Plantilla (Cuenta/Amount)
     # -------------------------------------------------------------------------
@@ -818,7 +852,7 @@ def render():
         st.subheader("🔍 Analise: Estado de Cuenta x Plantilla de Gastos")
 
         df_ec = st.session_state.get("aag_estado_df", None)
-        df_pg = st.session_state.get("aag_plantilla_df", None)
+        df_pg = st.session_state.get("aag_plantilla_df_orig", None)
 
         missing = []
         if df_ec is None or df_ec.empty:
@@ -980,7 +1014,7 @@ def render():
         upl_key = st.session_state["aag_state"].setdefault("uploader_key_cuenta", "aag_cuenta_upl_1")
         uploaded = st.file_uploader("Selecionar arquivo GL0061 (.txt)", type=["txt"], key=upl_key)
 
-        col_r, col_c = st.columns([2,1])
+        col_r, col_c = st.columns([2, 1])
         with col_r:
             run_clicked = st.button("▶️ Processar Cuenta", type="primary", use_container_width=True, disabled=(uploaded is None))
         with col_c:
@@ -1010,13 +1044,13 @@ def render():
                 st.error("Nenhuma linha reconhecida no arquivo GL0061.")
                 return
 
-            cta_str   = df["CTA"].apply(_str_or_empty) if "CTA" in df.columns else pd.Series([""]*len(df))
-            fecha_str = df["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df.columns else pd.Series([""]*len(df))
-            tran_str  = df["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df.columns else pd.Series([""]*len(df))
-            sreal_str = df["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df.columns else pd.Series([""]*len(df))
-            
+            cta_str = df["CTA"].apply(_str_or_empty) if "CTA" in df.columns else pd.Series([""] * len(df))
+            fecha_str = df["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df.columns else pd.Series([""] * len(df))
+            tran_str = df["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df.columns else pd.Series([""] * len(df))
+            sreal_str = df["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df.columns else pd.Series([""] * len(df))
+
             df["Chave"] = cta_str + "|" + fecha_str + "|" + tran_str + "|" + sreal_str
-            
+
             st.session_state["aag_cuenta_df"] = df.copy()
 
         if "aag_cuenta_df" in st.session_state and isinstance(st.session_state["aag_cuenta_df"], pd.DataFrame):
@@ -1046,7 +1080,7 @@ def render():
             with col2:
                 xlsx_bytes = to_xlsx_bytes_format(
                     df, "Cuenta",
-                    numeric_cols=["Debe","Haber","Saldo Real","Saldo"],
+                    numeric_cols=["Debe", "Haber", "Saldo Real", "Saldo"],
                     date_cols=date_cols
                 )
                 st.download_button(
