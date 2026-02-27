@@ -517,7 +517,7 @@ def render():
     st.divider()
 
     # ====== AÇÃO: Limpieza Plantilla Gastos ======
-    if limpeza_pg_clicked:
+    if limpeza_pg_clicked or st.session_state["aag_state"].get("last_action") == "limpieza_pg":
         st.subheader("🧹 Limpieza da Plantilla de Gastos")
         try:
             df_pg_orig = st.session_state.get("aag_plantilla_df_orig", None)
