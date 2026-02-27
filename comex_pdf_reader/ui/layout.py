@@ -1,11 +1,13 @@
+# layout.py
 import streamlit as st
 from settings import APP_NAME
 from auth import do_logout
 
-def app_header():
+def app_header(title: str | None = None):
     left, mid, right = st.columns([1, 2, 1])
     with left:
-        st.markdown(f"### 📄 {APP_NAME}")
+        # Usa o título informado; se não vier, usa o APP_NAME padrão
+        st.markdown(f"### 📄 {title or APP_NAME}")
     with mid:
         st.empty()
     with right:
