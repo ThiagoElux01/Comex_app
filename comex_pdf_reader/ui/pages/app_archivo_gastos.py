@@ -551,6 +551,8 @@ def render():
                 if stats["rows_removed"] == 0:
                     st.info("Nenhuma divergência de contagem encontrada. Nada foi removido.")
 
+                # ... depois de montar df_cmp e antes do bloco de métricas existentes:
+    
                 # =========================
                 # Analise (pós-limpeza)
                 # =========================
@@ -1156,7 +1158,16 @@ def render():
 
             pbar.progress(90, text="Preparando visualização...")
 
-            c1, c2, c3 = st.columns(3)
+            # ... depois de montar df_cmp e antes do bloco de métricas existentes:
+            
+            # Contagem de contas com divergência (únicas)
+            div_count = int(df_cmp.loc[df_cmp["_div"], "Cuenta"].nunique())
+            
+            # Você já tem:
+            # c1, c2, c3 = st.columns(3)
+            # Vamos aumentar para 4 colunas e incluir a diverência:
+            
+            c1, c2, c3, c4 = st.columns(4)
             with c1:
                 st.metric("Contas (Estado)", f"{df_ec_agg['Cuenta'].nunique():,}".replace(",", "."))
             with c2:
@@ -1169,6 +1180,9 @@ def render():
                     "Soma Plantilla de Gastos",
                     f"{df_pg_agg['Saldo_Plantilla_Gastos'].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
                 )
+            with c4:
+                # Título em espanhol, seguindo o pedido
+                st.metric("Cuentas con divergencia", f"{div_count:,}".replace(",", "."))
 
             only_div = st.checkbox("Mostrar apenas contas com divergência", value=True)
             df_show = df_cmp[df_cmp["_div"]] if only_div else df_cmp
