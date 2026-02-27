@@ -807,51 +807,31 @@ def render():
             st.rerun()
 
         if run_clicked and uploaded is not None:
+            pbar = st.progress(0, text="Lendo arquivo .txt...")
+            try:
+                raw_bytes = uploaded.getvalue()
+                try:
+                    text = raw_bytes.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = raw_bytes.decode("latin-1")
 
-            # garante lista acumulada:
-            if "aag_cuenta_list" not in st.session_state:
-                st.session_state["aag_cuenta_list"] = []
-        
-            cuenta_list = st.session_state["aag_cuenta_list"]
-        
-            # agora permite carregar 1 ou MAIS arquivos
-            files = uploaded if isinstance(uploaded, list) else [uploaded]
-        
-            for file in files:
-                raw = file.getvalue()
-                try:
-                    text = raw.decode("utf-8")
-                except Exception:
-                    text = raw.decode("latin-1")
-        
-                try:
-                    df_part = parse_cuenta_gl(text)
-                except Exception as e:
-                    st.error(f"Erro ao ler GL0061: {file.name}")
-                    st.exception(e)
-                    continue
-        
-                # prepara Chave (mantém igual seu código atual)
-                cta_str   = df_part["CTA"].apply(_str_or_empty)
-                fecha_str = df_part["Fecha"].apply(_fmt_date_ddmmyyyy)
-                tran_str  = df_part["Transacción"].apply(_fmt_transno_keep_zeros)
-                sreal_str = df_part["Saldo Real"].apply(_fmt_num_2dec_point)
-        
-                df_part["Chave"] = (
-                    cta_str + "\n" + fecha_str + "\n" + tran_str + "\n" + sreal_str
-                )
-        
-                # adiciona à lista acumulada
-                cuenta_list.append(df_part)
-        
-            # consolida tudo em um único dataframe
-            df_all = pd.concat(cuenta_list, ignore_index=True)
-        
-            # salva no formato esperado pelo resto do código
-            st.session_state["aag_cuenta_df"] = df_all.copy()
-        
-            st.success(f"Total acumulado: {len(df_all):,} linhas")
-    
+                pbar.progress(35, text="Convertendo para DataFrame...")
+                df_base = parse_estado_cuenta_txt(text)
+
+                if df_base is None or df_base.empty:
+                    st.warning("Nenhuma linha válida encontrada no arquivo.")
+                    pbar.progress(0, text="Aguardando...")
+                    return
+
+                st.session_state["aag_estado_df"] = df_base.copy()
+
+                pbar.progress(70, text="Preparando visualização...")
+                st.success("Arquivo processado com sucesso.")
+                pbar.progress(100, text="Concluído.")
+            except Exception as e:
+                st.error("Erro ao processar o arquivo .txt.")
+                st.exception(e)
+
         if "aag_estado_df" in st.session_state and isinstance(st.session_state["aag_estado_df"], pd.DataFrame):
             df_base = st.session_state["aag_estado_df"]
 
@@ -1211,85 +1191,57 @@ def render():
             st.error("Erro durante a comparação.")
             st.exception(e)
 
+    # -------------------------------------------------------------------------
+    # Modo: Cuenta (GL0061)
+    # -------------------------------------------------------------------------
     elif mode == "cuenta":
         st.subheader("📘 Importar Archivo de Cuenta (GL0061)")
-    
+
         upl_key = st.session_state["aag_state"].setdefault("uploader_key_cuenta", "aag_cuenta_upl_1")
-    
-        # Agora aceitamos múltiplos arquivos
-        uploaded_list = st.file_uploader(
-            "Selecionar arquivo(s) GL0061 (.txt)",
-            type=["txt"],
-            key=upl_key,
-            accept_multiple_files=True  # <<<<<<<<<<<<<< mudança principal
-        )
-    
-        # Estado dos botões
-        num_files = 0 if not uploaded_list else len(uploaded_list)
+        uploaded = st.file_uploader("Selecionar arquivo GL0061 (.txt)", type=["txt"], key=upl_key)
+
         col_r, col_c = st.columns([2, 1])
         with col_r:
-            run_clicked = st.button(
-                "▶️ Processar Cuenta" + (f" ({num_files} arquivo(s))" if num_files else ""),
-                type="primary",
-                use_container_width=True,
-                disabled=(not uploaded_list or num_files == 0)
-            )
+            run_clicked = st.button("▶️ Processar Cuenta", type="primary", use_container_width=True, disabled=(uploaded is None))
         with col_c:
             clear_clicked = st.button("Limpar", use_container_width=True)
-    
-        # Botão Limpar mantém o comportamento atual (reseta uploader e DataFrame da sessão)
+
         if clear_clicked:
             st.session_state["aag_state"]["uploader_key_cuenta"] = upl_key + "_x"
             if "aag_cuenta_df" in st.session_state:
                 del st.session_state["aag_cuenta_df"]
             st.rerun()
-    
-        # Processar 1..N arquivos e ACUMULAR na sessão
-        if run_clicked and uploaded_list:
-            dfs = []
-            for uploaded in uploaded_list:
-                raw = uploaded.getvalue()
-                try:
-                    text = raw.decode("utf-8")
-                except Exception:
-                    text = raw.decode("latin-1")
-    
-                try:
-                    df_part = parse_cuenta_gl(text)  # mantém o parser atual
-                except Exception as e:
-                    st.error(f"Erro ao interpretar o arquivo GL0061: {getattr(uploaded, 'name', '(sem nome)')}")
-                    st.exception(e)
-                    continue
-    
-                if df_part is None or df_part.empty:
-                    st.warning(f"Nenhuma linha reconhecida no arquivo: {getattr(uploaded, 'name', '(sem nome)')}")
-                    continue
-    
-                # Mantém a lógica atual de construção da Chave
-                cta_str = df_part["CTA"].apply(_str_or_empty) if "CTA" in df_part.columns else pd.Series([""] * len(df_part))
-                fecha_str = df_part["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df_part.columns else pd.Series([""] * len(df_part))
-                tran_str = df_part["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df_part.columns else pd.Series([""] * len(df_part))
-                sreal_str = df_part["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df_part.columns else pd.Series([""] * len(df_part))
-    
-                df_part["Chave"] = cta_str + "\n" + fecha_str + "\n" + tran_str + "\n" + sreal_str
-                dfs.append(df_part)
-    
-            if dfs:
-                df_new = pd.concat(dfs, ignore_index=True)
-    
-                # Se já existe conta acumulada na sessão, CONCATENA; senão, define pela primeira vez
-                df_prev = st.session_state.get("aag_cuenta_df", None)
-                if isinstance(df_prev, pd.DataFrame) and not df_prev.empty:
-                    df_all = pd.concat([df_prev, df_new], ignore_index=True)
-                else:
-                    df_all = df_new
-    
-                st.session_state["aag_cuenta_df"] = df_all.copy()
-                st.success(f"Arquivos processados e acumulados com sucesso. Total de linhas: {len(df_all):,}".replace(",", "."))
-    
-        # Exibição e downloads mantêm a mesma aparência/formatos
+
+        if run_clicked and uploaded is not None:
+            raw = uploaded.getvalue()
+            try:
+                text = raw.decode("utf-8")
+            except Exception:
+                text = raw.decode("latin-1")
+
+            try:
+                df = parse_cuenta_gl(text)
+            except Exception as e:
+                st.error("Erro ao interpretar o arquivo GL0061.")
+                st.exception(e)
+                return
+
+            if df.empty:
+                st.error("Nenhuma linha reconhecida no arquivo GL0061.")
+                return
+
+            cta_str = df["CTA"].apply(_str_or_empty) if "CTA" in df.columns else pd.Series([""] * len(df))
+            fecha_str = df["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df.columns else pd.Series([""] * len(df))
+            tran_str = df["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df.columns else pd.Series([""] * len(df))
+            sreal_str = df["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df.columns else pd.Series([""] * len(df))
+
+            df["Chave"] = cta_str + "|" + fecha_str + "|" + tran_str + "|" + sreal_str
+
+            st.session_state["aag_cuenta_df"] = df.copy()
+
         if "aag_cuenta_df" in st.session_state and isinstance(st.session_state["aag_cuenta_df"], pd.DataFrame):
             df = st.session_state["aag_cuenta_df"]
+
             date_cols = [c for c in ["Fecha", "Fechado"] if c in df.columns]
             col_cfg = {
                 "Debe": st.column_config.NumberColumn(format="%.2f"),
@@ -1299,9 +1251,9 @@ def render():
             }
             for dc in date_cols:
                 col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
-    
+
             st.dataframe(df, use_container_width=True, height=600, column_config=col_cfg)
-    
+
             col1, col2 = st.columns(2)
             with col1:
                 st.download_button(
@@ -1324,5 +1276,6 @@ def render():
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
-        else:
-            st.info("Selecione um ou mais arquivos GL0061 para continuar.")
+
+    else:
+        st.info("Selecione um modo acima para continuar.")
