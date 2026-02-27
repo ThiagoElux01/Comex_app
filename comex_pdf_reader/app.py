@@ -8,6 +8,12 @@ from ui.pages import home, process_pdfs, settings_page
 from ui.pages import downloads_page
 from ui.pages import app_archivo_gastos
 
+try:
+    # Quando o app roda como package (Streamlit Cloud / execução padrão)
+    from .asientos_contables_module import render_asientos_contables_ui
+except ImportError:
+    # Fallback local (se executar via `streamlit run comex_pdf_reader/app.py`)
+    from asientos_contables_module import render_asientos_contables_ui
 def main():
     st.set_page_config(page_title="COMEX PDF READER", page_icon="📄", layout="wide")
 
