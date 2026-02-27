@@ -813,7 +813,7 @@ def render():
                 else:
                     col_cfg[dc] = st.column_config.TextColumn()
 
-            st.dataframe(df_pg, use_container_width=True, height=550, column_config=col_cfg)
+            # st.dataframe(df_pg, use_container_width=True, height=550, column_config=col_cfg)
 
             col_csv, col_xlsx = st.columns(2)
             with col_csv:
