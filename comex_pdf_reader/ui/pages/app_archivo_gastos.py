@@ -8,6 +8,10 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Font
 from pandas.api.types import is_numeric_dtype
 
+# -----------------------------------------------------------------------------
+# Estado e helpers
+# -----------------------------------------------------------------------------
+
 def _ensure_state():
     """
     Garante que todas as chaves necessárias existam em st.session_state,
@@ -30,25 +34,12 @@ def _ensure_state():
     if "aag_mode" not in st.session_state:
         st.session_state["aag_mode"] = "estado"  # default
 
-    # ------------------ NOVO: flags/estruturas de acúmulo ------------------
-    # Se True, a limpeza aplica sobre a última versão limpa (progressiva)
-    aag.setdefault("limpieza_acumular_pg", True)
-
-    # Se True, cada GL0061 carregado vai sendo acumulado
-    aag.setdefault("cuenta_acumular", True)
-
-    # DataFrame acumulado de cuentas (GL0061)
-    if "aag_cuenta_df_accum" not in st.session_state:
-        st.session_state["aag_cuenta_df_accum"] = None
-
-    # Backup para desfazer última limpeza
-    if "aag_plantilla_df_clean_prev" not in st.session_state:
-        st.session_state["aag_plantilla_df_clean_prev"] = None
-
 
 def _set_mode(mode: str):
     st.session_state["aag_mode"] = mode
 
+
+# ==== Helpers de formatação para 'Chave' ====
 
 def _fmt_date_ddmmyyyy(value) -> str:
     """Converte vários tipos de data para 'dd/mm/aaaa' como string."""
@@ -103,7 +94,9 @@ def _fmt_transno_keep_zeros(x, width: int = 9) -> str:
     return s.zfill(width)
 
 
-_EXCEL_ORIGIN = "1899-12-30"
+# ==== Helpers robustos para datas na PLANTILLA ====
+_EXCEL_ORIGIN = "1899-12-30"  # origem do Excel (Windows)
+
 
 def _to_datetime_from_mixed_excel_and_strings(s: pd.Series) -> pd.Series:
     """
@@ -145,6 +138,10 @@ def _fmt_date_series_ddmmyyyy(s: pd.Series) -> pd.Series:
     s_dt = pd.to_datetime(s, errors="coerce")
     return s_dt.dt.strftime("%d/%m/%Y").fillna("")
 
+
+# -----------------------------------------------------------------------------
+# Limpieza Plantilla Gastos — helper robusto
+# -----------------------------------------------------------------------------
 
 def limpiar_plantilla_contra_cuenta(
     df_pg: pd.DataFrame,
@@ -240,7 +237,11 @@ def limpiar_plantilla_contra_cuenta(
     return df_clean, stats
 
 
-_NUM = r"(\-?\d[\d,]*\.\d{2}\-?)"
+# -----------------------------------------------------------------------------
+# Parsers - ESTADO DE CUENTA (.txt)
+# -----------------------------------------------------------------------------
+_NUM = r"(\-?\d[\d,]*\.\d{2}\-?)"  # número com milhares e 2 decimais; pode terminar com '-' (negativo)
+
 
 def _clean_num(s: str) -> float | None:
     """Converte strings como '12,345.67-' em float (negativo)."""
@@ -304,6 +305,10 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
         df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
+
+# -----------------------------------------------------------------------------
+# PARSER GL0061 — colunas fixas
+# -----------------------------------------------------------------------------
 
 def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     """
@@ -400,6 +405,10 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     return df
 
 
+# -----------------------------------------------------------------------------
+# Export XLSX com máscara numérica e data
+# -----------------------------------------------------------------------------
+
 def to_xlsx_bytes_format(
     df: pd.DataFrame,
     sheet_name: str,
@@ -467,6 +476,10 @@ def to_xlsx_bytes_format(
     return buffer.getvalue()
 
 
+# -----------------------------------------------------------------------------
+# Página
+# -----------------------------------------------------------------------------
+
 def render():
     _ensure_state()
 
@@ -515,70 +528,21 @@ def render():
     if mode == "limpieza":
         st.subheader("🧹 Limpieza da Plantilla de Gastos")
         try:
-            # Escolhe base da Plantilla: última limpa (acumular) ou original
-            acum_pg = st.toggle(
-                "Acumular limpezas: aplicar sobre a última versão LIMPA (em vez da original)",
-                value=st.session_state["aag_state"]["limpieza_acumular_pg"],
-                help="Se ligado, cada nova limpeza parte da última Plantilla limpa ao invés da original.",
-                key="limpieza_accum_toggle"
-            )
-            st.session_state["aag_state"]["limpieza_acumular_pg"] = acum_pg
-
-            # Botão para desfazer a última limpeza
-            col_undo, col_sp = st.columns([1, 2])
-            with col_undo:
-                undo_click = st.button("↩️ Desfazer última limpeza", use_container_width=True)
-
-            if undo_click:
-                prev = st.session_state.get("aag_plantilla_df_clean_prev", None)
-                if prev is not None and isinstance(prev, pd.DataFrame) and not prev.empty:
-                    st.session_state["aag_plantilla_df_clean"] = prev.copy()
-                    st.success("Última limpeza desfeita.")
-                else:
-                    st.info("Não há versão anterior para desfazer.")
-
-            # Recupera Plantilla base
             df_pg_orig = st.session_state.get("aag_plantilla_df_orig", None)
-            df_pg_clean_current = st.session_state.get("aag_plantilla_df_clean", None)
-            base_pg = None
-            if acum_pg and df_pg_clean_current is not None and not df_pg_clean_current.empty:
-                base_pg = df_pg_clean_current.copy()
-                st.caption("Base: **Última versão limpa** da Plantilla.")
-            else:
-                base_pg = df_pg_orig.copy() if df_pg_orig is not None else None
-                st.caption("Base: **Plantilla original**.")
+            df_ct = st.session_state.get("aag_cuenta_df", None)
 
-            # Recupera Cuenta acumulada (ou a última, como fallback)
-            df_ct_acc = st.session_state.get("aag_cuenta_df_accum", None)
-            df_ct_last = st.session_state.get("aag_cuenta_df", None)
-            df_ct = df_ct_acc if (df_ct_acc is not None and not df_ct_acc.empty) else df_ct_last
-
-            if base_pg is None or base_pg.empty:
+            if df_pg_orig is None or df_pg_orig.empty:
                 st.error("Antes de limpar, carregue e execute a **Plantilla de Gastos**.")
             elif df_ct is None or df_ct.empty:
-                st.error("Antes de limpar, carregue e processe pelo menos um **Archivo de Cuenta (GL0061)**.")
+                st.error("Antes de limpar, carregue e processe o **Archivo de Cuenta (GL0061)**.")
             else:
-                # ------------------ Filtro de CTA a limpar ------------------
-                ctas = sorted([c for c in df_ct["CTA"].astype(str).unique() if c and c.strip() != ""]) if "CTA" in df_ct.columns else []
-                if ctas:
-                    sel_ctas = st.multiselect("Filtrar CTA(s) para a limpeza (opcional)", options=ctas, default=ctas)
-                    if sel_ctas:
-                        df_ct_use = df_ct[df_ct["CTA"].astype(str).isin(sel_ctas)].copy()
-                    else:
-                        df_ct_use = df_ct.copy()
-                else:
-                    df_ct_use = df_ct.copy()
-
-                # Executa a limpeza sobre a BASE selecionada
-                df_pg_clean_new, stats = limpiar_plantilla_contra_cuenta(base_pg, df_ct_use, chave_col="Chave")
-                # Guarda backup para permitir "Desfazer"
-                st.session_state["aag_plantilla_df_clean_prev"] = st.session_state.get("aag_plantilla_df_clean", None)
-                st.session_state["aag_plantilla_df_clean"] = df_pg_clean_new.copy()
+                df_pg_clean, stats = limpiar_plantilla_contra_cuenta(df_pg_orig, df_ct, chave_col="Chave")
+                st.session_state["aag_plantilla_df_clean"] = df_pg_clean.copy()
                 st.session_state["aag_state"]["last_action"] = "limpieza_pg"
 
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    st.metric("Linhas (Original/Base)", f"{stats['rows_original']:,}".replace(",", "."))
+                    st.metric("Linhas (Original)", f"{stats['rows_original']:,}".replace(",", "."))
                 with c2:
                     st.metric("Linhas (Limpo)", f"{stats['rows_clean']:,}".replace(",", "."))
                 with c3:
@@ -591,7 +555,7 @@ def render():
                 # Analise (pós-limpeza)
                 # =========================
                 st.divider()
-                st.subheader("🔍 Analise (Estado de Cuenta × Plantilla **limpa**)" )
+                st.subheader("🔍 Analise (Estado de Cuenta × Plantilla **limpa**)")
 
                 # Precisamos do Estado e da Plantilla limpa
                 df_ec = st.session_state.get("aag_estado_df", None)
@@ -615,7 +579,7 @@ def render():
                     try:
                         if "CTA" not in df_ec.columns or "Período" not in df_ec.columns:
                             st.error("Estado de Cuenta não contém as colunas esperadas: 'CTA' e 'Período'.")
-                            return
+                            return  
 
                         df_ec_proc = df_ec.copy()
                         df_ec_proc["CTA"] = df_ec_proc["CTA"].apply(_norm_conta)
@@ -1236,24 +1200,6 @@ def render():
         upl_key = st.session_state["aag_state"].setdefault("uploader_key_cuenta", "aag_cuenta_upl_1")
         uploaded = st.file_uploader("Selecionar arquivo GL0061 (.txt)", type=["txt"], key=upl_key)
 
-        # ------------------ NOVO: controles de acúmulo ------------------
-        st.caption("Você pode acumular várias Cuentas para rodar a limpeza de uma vez.")
-        col_acc1, col_acc2, col_acc3 = st.columns([1.4, 1.2, 1.2])
-        with col_acc1:
-            st.session_state["aag_state"]["cuenta_acumular"] = st.toggle(
-                "Acumular esta Cuenta ao conjunto atual",
-                value=st.session_state["aag_state"]["cuenta_acumular"],
-                help="Se ligado, a Cuenta carregada será somada ao acumulado; se desligado, substituirá o acumulado."
-            )
-        with col_acc2:
-            limpar_acum_clicked = st.button("🧹 Limpar acumulado de Cuentas", use_container_width=True)
-        with col_acc3:
-            ver_acum_clicked = st.button("👁️ Ver acumulado", use_container_width=True)
-
-        if limpar_acum_clicked:
-            st.session_state["aag_cuenta_df_accum"] = None
-            st.success("Acumulado de Cuentas limpo.")
-
         col_r, col_c = st.columns([2, 1])
         with col_r:
             run_clicked = st.button("▶️ Processar Cuenta", type="primary", use_container_width=True, disabled=(uploaded is None))
@@ -1291,26 +1237,8 @@ def render():
 
             df["Chave"] = cta_str + "|" + fecha_str + "|" + tran_str + "|" + sreal_str
 
-            # Guarda a última cuenta carregada (para visualização)
             st.session_state["aag_cuenta_df"] = df.copy()
 
-            # ------------------ ACUMULAR/SUBSTITUIR ------------------
-            acumular = st.session_state["aag_state"]["cuenta_acumular"]
-            df_acc = st.session_state.get("aag_cuenta_df_accum", None)
-
-            if not acumular or df_acc is None:
-                # Substitui o acumulado (ou inicia)
-                st.session_state["aag_cuenta_df_accum"] = df.copy()
-            else:
-                # Concatena ao acumulado e remove duplicados por 'Chave'
-                df_new = pd.concat([df_acc, df], ignore_index=True)
-                if "Chave" in df_new.columns:
-                    df_new = df_new.drop_duplicates(subset=["Chave"], keep="first").reset_index(drop=True)
-                st.session_state["aag_cuenta_df_accum"] = df_new
-
-            st.success("Cuenta processada e atualizada no acumulado.")
-
-        # Visualização: último arquivo e (opcional) acumulado
         if "aag_cuenta_df" in st.session_state and isinstance(st.session_state["aag_cuenta_df"], pd.DataFrame):
             df = st.session_state["aag_cuenta_df"]
 
@@ -1324,13 +1252,12 @@ def render():
             for dc in date_cols:
                 col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
 
-            st.markdown("**Última Cuenta carregada**")
-            st.dataframe(df, use_container_width=True, height=400, column_config=col_cfg)
+            st.dataframe(df, use_container_width=True, height=600, column_config=col_cfg)
 
             col1, col2 = st.columns(2)
             with col1:
                 st.download_button(
-                    "Baixar CSV (última Cuenta)",
+                    "Baixar CSV",
                     df.to_csv(index=False).encode("utf-8"),
                     "cuenta.csv",
                     "text/csv",
@@ -1343,30 +1270,12 @@ def render():
                     date_cols=date_cols
                 )
                 st.download_button(
-                    "Baixar XLSX (última Cuenta)",
+                    "Baixar XLSX",
                     xlsx_bytes,
                     "cuenta.xlsx",
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
 
-        # Mostra o acumulado sob demanda
-        if ver_acum_clicked:
-            df_acc = st.session_state.get("aag_cuenta_df_accum", None)
-            if df_acc is None or df_acc.empty:
-                st.info("Acumulado de Cuentas está vazio.")
-            else:
-                st.markdown("**Acumulado de Cuentas (para Limpieza)**")
-                st.dataframe(
-                    df_acc, use_container_width=True, height=420,
-                    column_config={
-                        "Debe": st.column_config.NumberColumn(format="%.2f"),
-                        "Haber": st.column_config.NumberColumn(format="%.2f"),
-                        "Saldo Real": st.column_config.NumberColumn(format="%.2f"),
-                        "Saldo": st.column_config.NumberColumn(format="%.2f"),
-                    }
-                )
-
     else:
         st.info("Selecione um modo acima para continuar.")
-
