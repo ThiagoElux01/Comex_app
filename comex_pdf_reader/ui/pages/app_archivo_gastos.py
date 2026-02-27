@@ -7,6 +7,32 @@ from io import BytesIO
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Font
 from pandas.api.types import is_numeric_dtype
+# ── Robustez de import para rodar localmente e no Streamlit Cloud ──────────────
+import os, sys
+
+# Caminho deste arquivo (…/comex_app/comex_pdf_reader/app.py)
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Raiz do pacote (…/comex_app/comex_pdf_reader)
+_PKG_DIR = _CURRENT_DIR
+# Raiz do repo (…/comex_app)
+_REPO_DIR = os.path.abspath(os.path.join(_PKG_DIR, os.pardir))
+
+# Garante que o pacote e/ou a raiz do repo estejam no sys.path
+for _p in (_PKG_DIR, _REPO_DIR):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+# Tenta import absoluto e, se falhar, o relativo
+try:
+    # Caso execute a partir da raiz do repo (recomendado)
+    from comex_pdf_reader.ui.pages import app_archivo_gastos
+except ModuleNotFoundError:
+    try:
+        # Caso execute diretamente dentro de comex_pdf_reader
+        from ui.pages import app_archivo_gastos
+    except ModuleNotFoundError:
+        # Caso execute como módulo (-m comex_pdf_reader.app)
+        from .ui.pages import app_archivo_gastos
 
 # -----------------------------------------------------------------------------
 # Estado e helpers
