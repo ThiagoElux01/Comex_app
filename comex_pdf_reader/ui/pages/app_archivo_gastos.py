@@ -1191,136 +1191,168 @@ def render():
             st.error("Erro durante a comparação.")
             st.exception(e)
 
-    # -------------------------------------------------------------------------
-    # Modo: Cuenta (GL0061)
-    # -------------------------------------------------------------------------
-    # -------------------------------------------------------------------------
-    # Modo: Cuenta (GL0061)  >>> BLOCO SUBSTITUÍDO PARA SUPORTAR VÁRIOS ARQUIVOS
-    # -------------------------------------------------------------------------
-    elif mode == "cuenta":
-        st.subheader("📘 Importar Archivo de Cuenta (GL0061)")
-    
-        upl_key = st.session_state["aag_state"].setdefault("uploader_key_cuenta", "aag_cuenta_upl_1")
-        uploaded_files = st.file_uploader(
-            "Selecionar um ou mais arquivos GL0061 (.txt)",
-            type=["txt"],
-            key=upl_key,
-            accept_multiple_files=True
-        )
-    
-        col_r, col_c = st.columns([2, 1])
-        with col_r:
-            run_clicked = st.button(
-                "▶️ Processar Cuenta(s)",
-                type="primary",
-                use_container_width=True,
-                disabled=(not uploaded_files or len(uploaded_files) == 0)
+        # -------------------------------------------------------------------------
+        # Modo: Cuenta (GL0061)  >>> SUPORTE A VÁRIOS ARQUIVOS + DEDUPE POR Chave
+        # -------------------------------------------------------------------------
+        elif mode == "cuenta":
+            st.subheader("📘 Importar Archivo de Cuenta (GL0061)")
+        
+            upl_key = st.session_state["aag_state"].setdefault("uploader_key_cuenta", "aag_cuenta_upl_1")
+            uploaded_files = st.file_uploader(
+                "Selecionar um ou mais arquivos GL0061 (.txt)",
+                type=["txt"],
+                key=upl_key,
+                accept_multiple_files=True
             )
-        with col_c:
-            clear_clicked = st.button("Limpar", use_container_width=True)
-    
-        if clear_clicked:
-            # reseta a key do uploader e limpa o DF de cuenta
-            st.session_state["aag_state"]["uploader_key_cuenta"] = upl_key + "_x"
-            if "aag_cuenta_df" in st.session_state:
-                del st.session_state["aag_cuenta_df"]
-            st.rerun()
-    
-        if run_clicked and uploaded_files:
-            # Processa múltiplos arquivos
-            dfs = []
-            pbar = st.progress(0, text=f"Lendo {len(uploaded_files)} arquivo(s)...")
-            try:
-                for idx, uploaded in enumerate(uploaded_files, start=1):
-                    raw = uploaded.getvalue()
-                    # decodificação robusta
-                    try:
-                        text = raw.decode("utf-8")
-                    except Exception:
-                        text = raw.decode("latin-1")
-    
-                    # parse individual
-                    try:
-                        df_i = parse_cuenta_gl(text)
-                    except Exception as e:
-                        st.error(f"Erro ao interpretar o arquivo GL0061: {getattr(uploaded, 'name', '(sem nome)')}")
-                        st.exception(e)
-                        continue
-    
-                    if df_i is None or df_i.empty:
-                        st.warning(f"Nenhuma linha reconhecida no arquivo: {getattr(uploaded, 'name', '(sem nome)')}")
-                        continue
-    
-                    # monta Chave para o arquivo atual
-                    cta_str  = df_i["CTA"].apply(_str_or_empty) if "CTA" in df_i.columns else pd.Series([""] * len(df_i))
-                    fecha_str = df_i["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df_i.columns else pd.Series([""] * len(df_i))
-                    tran_str  = df_i["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df_i.columns else pd.Series([""] * len(df_i))
-                    sreal_str = df_i["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df_i.columns else pd.Series([""] * len(df_i))
-    
-                    df_i["Chave"] = cta_str + "\n" + fecha_str + "\n" + tran_str + "\n" + sreal_str
-    
-                    # opcional: adiciona coluna do nome do arquivo para rastreabilidade
-                    df_i["_Archivo"] = getattr(uploaded, "name", "")
-    
-                    dfs.append(df_i)
-    
-                    # avança progress bar
-                    prog = int(100 * (idx / max(len(uploaded_files), 1)))
-                    pbar.progress(prog, text=f"Processando {idx}/{len(uploaded_files)}...")
-    
-                # concatena todos
-                if len(dfs) == 0:
-                    st.error("Nenhum dado válido foi encontrado nos arquivos enviados.")
-                    return
-    
-                df_all = pd.concat(dfs, ignore_index=True)
-                st.session_state["aag_cuenta_df"] = df_all.copy()
-    
-                pbar.progress(100, text="Concluído.")
-                st.success(f"{len(dfs)} arquivo(s) processado(s) e consolidado(s).")
-    
-            except Exception as e:
-                st.error("Erro ao processar os arquivos GL0061.")
-                st.exception(e)
-    
-        # Exibição / download do consolidado
-        if "aag_cuenta_df" in st.session_state and isinstance(st.session_state["aag_cuenta_df"], pd.DataFrame):
-            df = st.session_state["aag_cuenta_df"]
-    
-            date_cols = [c for c in ["Fecha", "Fechado"] if c in df.columns]
-            col_cfg = {
-                "Debe": st.column_config.NumberColumn(format="%.2f"),
-                "Haber": st.column_config.NumberColumn(format="%.2f"),
-                "Saldo Real": st.column_config.NumberColumn(format="%.2f"),
-                "Saldo": st.column_config.NumberColumn(format="%.2f"),
-            }
-            for dc in date_cols:
-                col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
-    
-            st.dataframe(df, use_container_width=True, height=600, column_config=col_cfg)
-    
-            col1, col2 = st.columns(2)
-            with col1:
-                st.download_button(
-                    "Baixar CSV (Cuenta consolidada)",
-                    df.to_csv(index=False).encode("utf-8"),
-                    "cuenta_consolidada.csv",
-                    "text/csv",
-                    use_container_width=True
+        
+            col_r, col_c = st.columns([2, 1])
+            with col_r:
+                run_clicked = st.button(
+                    "▶️ Processar Cuenta(s)",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=(not uploaded_files or len(uploaded_files) == 0)
                 )
-            with col2:
-                xlsx_bytes = to_xlsx_bytes_format(
-                    df, "Cuenta",
-                    numeric_cols=["Debe", "Haber", "Saldo Real", "Saldo"],
-                    date_cols=date_cols
-                )
-                st.download_button(
-                    "Baixar XLSX (Cuenta consolidada)",
-                    xlsx_bytes,
-                    "cuenta_consolidada.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
-
+            with col_c:
+                clear_clicked = st.button("Limpar", use_container_width=True)
+        
+            if clear_clicked:
+                st.session_state["aag_state"]["uploader_key_cuenta"] = upl_key + "_x"
+                if "aag_cuenta_df" in st.session_state:
+                    del st.session_state["aag_cuenta_df"]
+                if "aag_cuenta_dups" in st.session_state:
+                    del st.session_state["aag_cuenta_dups"]
+                st.rerun()
+        
+            if run_clicked and uploaded_files:
+                dfs = []
+                pbar = st.progress(0, text=f"Lendo {len(uploaded_files)} arquivo(s)...")
+                try:
+                    for idx, uploaded in enumerate(uploaded_files, start=1):
+                        raw = uploaded.getvalue()
+                        try:
+                            text = raw.decode("utf-8")
+                        except Exception:
+                            text = raw.decode("latin-1")
+        
+                        # parse individual
+                        try:
+                            df_i = parse_cuenta_gl(text)
+                        except Exception as e:
+                            st.error(f"Erro ao interpretar o arquivo GL0061: {getattr(uploaded, 'name', '(sem nome)')}")
+                            st.exception(e)
+                            continue
+        
+                        if df_i is None or df_i.empty:
+                            st.warning(f"Nenhuma linha reconhecida no arquivo: {getattr(uploaded, 'name', '(sem nome)')}")
+                            continue
+        
+                        # monta Chave para o arquivo atual
+                        cta_str  = df_i["CTA"].apply(_str_or_empty) if "CTA" in df_i.columns else pd.Series([""] * len(df_i))
+                        fecha_str = df_i["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df_i.columns else pd.Series([""] * len(df_i))
+                        tran_str  = df_i["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df_i.columns else pd.Series([""] * len(df_i))
+                        sreal_str = df_i["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df_i.columns else pd.Series([""] * len(df_i))
+        
+                        df_i["Chave"] = cta_str + "\n" + fecha_str + "\n" + tran_str + "\n" + sreal_str
+        
+                        # rastreabilidade (opcional)
+                        df_i["_Archivo"] = getattr(uploaded, "name", "")
+        
+                        dfs.append(df_i)
+        
+                        prog = int(100 * (idx / max(len(uploaded_files), 1)))
+                        pbar.progress(prog, text=f"Processando {idx}/{len(uploaded_files)}...")
+        
+                    if len(dfs) == 0:
+                        st.error("Nenhum dado válido foi encontrado nos arquivos enviados.")
+                        return
+        
+                    # --- Consolida e remove duplicatas por Chave ---
+                    df_all = pd.concat(dfs, ignore_index=True)
+        
+                    # garante numéricos
+                    for c in ["Debe", "Haber", "Saldo Real", "Saldo"]:
+                        if c in df_all.columns:
+                            df_all[c] = pd.to_numeric(df_all[c], errors="coerce")
+        
+                    # identifica duplicatas (mesma Chave) que surgem com múltiplos arquivos
+                    dups_mask = df_all.duplicated(subset=["Chave"], keep="first")
+                    dups_count = int(dups_mask.sum())
+                    df_dups = df_all.loc[dups_mask].copy()
+        
+                    # aplica dedupe para que a contagem por Chave não infle e atrapalhe a limpeza
+                    df_all = df_all.drop_duplicates(subset=["Chave"], keep="first").reset_index(drop=True)
+        
+                    st.session_state["aag_cuenta_df"] = df_all.copy()
+                    st.session_state["aag_cuenta_dups"] = df_dups if dups_count > 0 else pd.DataFrame()
+        
+                    pbar.progress(100, text="Concluído.")
+                    st.success(f"{len(dfs)} arquivo(s) processado(s) e consolidado(s).")
+                    if dups_count > 0:
+                        st.info(f"Detectadas **{dups_count:,}** duplicatas por **Chave** no GL0061 consolidado — descartadas para a limpeza.")
+        
+                except Exception as e:
+                    st.error("Erro ao processar os arquivos GL0061.")
+                    st.exception(e)
+        
+            # Exibição / download do consolidado
+            if "aag_cuenta_df" in st.session_state and isinstance(st.session_state["aag_cuenta_df"], pd.DataFrame):
+                df = st.session_state["aag_cuenta_df"]
+        
+                date_cols = [c for c in ["Fecha", "Fechado"] if c in df.columns]
+                col_cfg = {
+                    "Debe": st.column_config.NumberColumn(format="%.2f"),
+                    "Haber": st.column_config.NumberColumn(format="%.2f"),
+                    "Saldo Real": st.column_config.NumberColumn(format="%.2f"),
+                    "Saldo": st.column_config.NumberColumn(format="%.2f"),
+                }
+                for dc in date_cols:
+                    col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
+        
+                # métricas rápidas
+                m1, m2, m3 = st.columns(3)
+                with m1:
+                    st.metric("Linhas (consolidado sem duplicatas)", f"{len(df):,}".replace(",", "."))
+                with m2:
+                    st.metric("CTAs distintas", f"{df['CTA'].nunique():,}".replace(",", ".") if "CTA" in df.columns else "—")
+                with m3:
+                    dups_log = st.session_state.get("aag_cuenta_dups", pd.DataFrame())
+                    st.metric("Duplicatas por Chave (descartadas)", f"{len(dups_log):,}".replace(",", "."))
+        
+                st.dataframe(df, use_container_width=True, height=600, column_config=col_cfg)
+        
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.download_button(
+                        "Baixar CSV (Cuenta consolidada)",
+                        df.to_csv(index=False).encode("utf-8"),
+                        "cuenta_consolidada.csv",
+                        "text/csv",
+                        use_container_width=True
+                    )
+                with col2:
+                    xlsx_bytes = to_xlsx_bytes_format(
+                        df, "Cuenta",
+                        numeric_cols=["Debe", "Haber", "Saldo Real", "Saldo"],
+                        date_cols=date_cols
+                    )
+                    st.download_button(
+                        "Baixar XLSX (Cuenta consolidada)",
+                        xlsx_bytes,
+                        "cuenta_consolidada.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+                with col3:
+                    # download opcional do log de duplicatas
+                    dups_log = st.session_state.get("aag_cuenta_dups", pd.DataFrame())
+                    st.download_button(
+                        "Baixar log de duplicatas (opcional)",
+                        dups_log.to_csv(index=False).encode("utf-8"),
+                        "cuenta_duplicatas_por_chave.csv",
+                        "text/csv",
+                        use_container_width=True,
+                        disabled=dups_log.empty
+                    )
     else:
         st.info("Selecione um modo acima para continuar.")
