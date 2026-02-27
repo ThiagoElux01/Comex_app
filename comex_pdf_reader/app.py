@@ -7,6 +7,7 @@ from settings import PAGES, APP_NAME
 from ui.pages import home, process_pdfs, settings_page
 from ui.pages import downloads_page
 from ui.pages import app_archivo_gastos
+from asientos_contables_module import render_asientos_contables_ui
 
 def main():
     st.set_page_config(page_title="COMEX PDF READER", page_icon="📄", layout="wide")
@@ -29,7 +30,7 @@ def main():
 
     # 4) Renderizar o cabeçalho com o título escolhido
     app_header(title=header_title)
-
+    
     # 5) Roteamento
     if page == "Home":
         home.render()
@@ -37,10 +38,12 @@ def main():
         process_pdfs.render()
     elif page == "Aplicación Archivo Gastos":
         app_archivo_gastos.render()
+    elif page == "Asientos Contables":                      # ← NOVO
+        render_asientos_contables_ui(session_key_df="asientos_df")
     elif page == "Configurações":
         settings_page.render()
     else:
         st.error("Página não encontrada.")
-
+        
 if __name__ == "__main__":
     main()
