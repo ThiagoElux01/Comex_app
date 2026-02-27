@@ -25,7 +25,7 @@ def main():
     # 3) Definir o título dinâmico do cabeçalho
     header_title = APP_NAME  # padrão
     if page == "Aplicación Archivo Gastos":
-        header_title = "Limpieza Plantilla Gastos"  # título em espanhol, como você pediu
+        header_title = "Plantilla Gastos"  # título em espanhol, como você pediu
 
     # 4) Renderizar o cabeçalho com o título escolhido
     app_header(title=header_title)
