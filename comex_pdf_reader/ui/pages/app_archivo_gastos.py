@@ -1190,6 +1190,7 @@ def render():
         except Exception as e:
             st.error("Erro durante a comparação.")
             st.exception(e)
+
     elif mode == "cuenta":
         st.subheader("📘 Importar Archivo de Cuenta (GL0061)")
     
