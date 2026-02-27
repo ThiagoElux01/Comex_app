@@ -1,6 +1,3 @@
-## 🔽 Substitua o conteúdo do arquivo pelo código abaixo
-
-```python
 # -*- coding: utf-8 -*-
 # ui/pages/app_archivo_gastos.py (optimized low-memory version)
 import re
@@ -213,7 +210,6 @@ def limpiar_plantilla_contra_cuenta(
     }
     return df_clean, stats
 
-
 # -----------------------------------------------------------------------------
 # Parsers - ESTADO DE CUENTA (.txt)
 # -----------------------------------------------------------------------------
@@ -355,7 +351,7 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
 
         dados.append([
             cta_header, cc, prod, cnt, tdw,
-            fecha, ntran, deve, haber,
+            fecha, ntran, debe, haber,
             saldo_real, saldo_impresso,
             texto
         ])
@@ -438,8 +434,6 @@ def to_xlsx_bytes_format(
 
     buffer.seek(0)
     return buffer.getvalue()
-
-
 # -----------------------------------------------------------------------------
 # Page
 # -----------------------------------------------------------------------------
@@ -1089,9 +1083,9 @@ def render():
             fecha_str = df["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df.columns else pd.Series([""]*len(df))
             tran_str  = df["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df.columns else pd.Series([""]*len(df))
             sreal_str = df["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df.columns else pd.Series([""]*len(df))
-            
+
             df["Chave"] = cta_str + "|" + fecha_str + "|" + tran_str + "|" + sreal_str
-            
+
             st.session_state["aag_cuenta_df"] = df.copy()
 
         if "aag_cuenta_df" in st.session_state and isinstance(st.session_state["aag_cuenta_df"], pd.DataFrame):
