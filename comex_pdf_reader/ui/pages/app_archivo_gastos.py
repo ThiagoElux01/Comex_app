@@ -532,24 +532,24 @@ def render():
                 st.session_state["aag_plantilla_df_clean"] = df_pg_clean.copy()
                 st.session_state["aag_state"]["last_action"] = "limpieza_pg"
 
-                c1, c2, c3, c4 = st.columns(4)
+                c1, c2, c3 = st.columns(3)
+                
                 with c1:
                     st.metric("Linhas (Original)", f"{stats['rows_original']:,}".replace(",", "."))
+                
                 with c2:
                     st.metric("Linhas (Limpo)", f"{stats['rows_clean']:,}".replace(",", "."))
+                
                 with c3:
                     st.metric("Removidas", f"{stats['rows_removed']:,}".replace(",", "."))
-                with c4:
-                    st.metric("Chaves Ajustadas", f"{stats['keys_with_removal']:,}".replace(",", "."))
-
+                
                 if stats["rows_removed"] == 0:
                     st.info("Nenhuma divergência de contagem encontrada. Nada foi removido.")
-                else:
-                    with st.expander("Ver detalhes por chave (quantidade removida)"):
-                        det = pd.DataFrame(
-                            [{"Chave": k, "Removidas": v} for k, v in stats["removed_by_key"].items()]
-                        ).sort_values(by="Removidas", ascending=False)
-                        st.dataframe(det, use_container_width=True, height=280)
+                
+                # ---- REMOVIDO ----
+                # - métrica "Chaves Ajustadas"
+                # - expander com detalhes por chave
+                # -------------------
 
                 # Prévia da Plantilla de Gastos (após limpeza) — SOMENTE nesta aba
                 df_pg_prev = st.session_state["aag_plantilla_df_clean"]
