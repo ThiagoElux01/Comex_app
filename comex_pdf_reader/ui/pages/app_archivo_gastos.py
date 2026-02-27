@@ -832,73 +832,73 @@ def render():
                 st.error("Erro ao processar o arquivo .txt.")
                 st.exception(e)
 
-    if "aag_estado_df" in st.session_state and isinstance(st.session_state["aag_estado_df"], pd.DataFrame):
-        df_base = st.session_state["aag_estado_df"]
-    
-        # --- KPIs solicitados ---
-        # Contagem de contas (CTA distintas)
-        contas_distintas = df_base["CTA"].astype(str).str.strip().replace({"": np.nan}).dropna().nunique() if "CTA" in df_base.columns else 0
-    
-        # Soma da coluna Período (sem incluir a linha TOTAL)
-        soma_periodo = 0.0
-        if "Período" in df_base.columns:
-            soma_periodo = pd.to_numeric(df_base["Período"], errors="coerce").fillna(0.0).sum()
-    
-        # Exibição dos KPIs
-        kpi1, kpi2 = st.columns(2)
-        with kpi1:
-            st.metric("Contagem de Contas no arquivo", f"{contas_distintas:,}".replace(",", "."))
-        with kpi2:
-            st.metric(
-                "Soma Coluna Período",
-                f"{soma_periodo:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            )
-    
-        # --- Tabela com linha TOTAL (como já existia) ---
-        df = df_base.copy()
-        numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
-        for c in numeric_cols:
-            if c in df.columns:
-                df[c] = pd.to_numeric(df[c], errors="coerce")
-    
-        totals = {c: float(np.nansum(df[c].values)) for c in numeric_cols if c in df.columns}
-    
-        # Adiciona linha TOTAL ao final (sem afetar os KPIs acima)
-        total_row = {col: "" for col in df.columns}
-        if "Descripción" in df.columns:
-            total_row["Descripción"] = "TOTAL"
-        for c in numeric_cols:
-            if c in totals:
-                total_row[c] = totals[c]
-        df = pd.concat([df, pd.DataFrame([total_row], columns=df.columns)], ignore_index=True)
-    
-        st.dataframe(
-            df,
-            use_container_width=True,
-            height=550,
-            column_config={c: st.column_config.NumberColumn(format="%.2f") for c in numeric_cols if c in df.columns},
-        )
-    
-        col_csv, col_xlsx = st.columns(2)
-        with col_csv:
-            st.download_button(
-                label="Baixar CSV (Estado de Cuenta)",
-                data=df.to_csv(index=False).encode("utf-8"),
-                file_name="estado_de_cuenta.csv",
-                mime="text/csv",
+        if "aag_estado_df" in st.session_state and isinstance(st.session_state["aag_estado_df"], pd.DataFrame):
+            df_base = st.session_state["aag_estado_df"]
+        
+            # --- KPIs solicitados ---
+            # Contagem de contas (CTA distintas)
+            contas_distintas = df_base["CTA"].astype(str).str.strip().replace({"": np.nan}).dropna().nunique() if "CTA" in df_base.columns else 0
+        
+            # Soma da coluna Período (sem incluir a linha TOTAL)
+            soma_periodo = 0.0
+            if "Período" in df_base.columns:
+                soma_periodo = pd.to_numeric(df_base["Período"], errors="coerce").fillna(0.0).sum()
+        
+            # Exibição dos KPIs
+            kpi1, kpi2 = st.columns(2)
+            with kpi1:
+                st.metric("Contagem de Contas no arquivo", f"{contas_distintas:,}".replace(",", "."))
+            with kpi2:
+                st.metric(
+                    "Soma Coluna Período",
+                    f"{soma_periodo:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                )
+        
+            # --- Tabela com linha TOTAL (como já existia) ---
+            df = df_base.copy()
+            numeric_cols = ["Sal OB", "Saldo OB", "Período", "Saldo CB"]
+            for c in numeric_cols:
+                if c in df.columns:
+                    df[c] = pd.to_numeric(df[c], errors="coerce")
+        
+            totals = {c: float(np.nansum(df[c].values)) for c in numeric_cols if c in df.columns}
+        
+            # Adiciona linha TOTAL ao final (sem afetar os KPIs acima)
+            total_row = {col: "" for col in df.columns}
+            if "Descripción" in df.columns:
+                total_row["Descripción"] = "TOTAL"
+            for c in numeric_cols:
+                if c in totals:
+                    total_row[c] = totals[c]
+            df = pd.concat([df, pd.DataFrame([total_row], columns=df.columns)], ignore_index=True)
+        
+            st.dataframe(
+                df,
                 use_container_width=True,
+                height=550,
+                column_config={c: st.column_config.NumberColumn(format="%.2f") for c in numeric_cols if c in df.columns},
             )
-        with col_xlsx:
-            xlsx_bytes = to_xlsx_bytes_format(
-                df, sheet_name="EstadoCuenta", numeric_cols=[c for c in numeric_cols if c in df.columns], date_cols=[]
-            )
-            st.download_button(
-                label="Baixar XLSX (Estado de Cuenta)",
-                data=xlsx_bytes,
-                file_name="estado_de_cuenta.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
+        
+            col_csv, col_xlsx = st.columns(2)
+            with col_csv:
+                st.download_button(
+                    label="Baixar CSV (Estado de Cuenta)",
+                    data=df.to_csv(index=False).encode("utf-8"),
+                    file_name="estado_de_cuenta.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+            with col_xlsx:
+                xlsx_bytes = to_xlsx_bytes_format(
+                    df, sheet_name="EstadoCuenta", numeric_cols=[c for c in numeric_cols if c in df.columns], date_cols=[]
+                )
+                st.download_button(
+                    label="Baixar XLSX (Estado de Cuenta)",
+                    data=xlsx_bytes,
+                    file_name="estado_de_cuenta.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
 
     # -------------------------------------------------------------------------
     # Modo: Plantilla de Gastos (.xlsx/.xls)
