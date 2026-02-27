@@ -1194,94 +1194,54 @@ def render():
     # -------------------------------------------------------------------------
     # Modo: Cuenta (GL0061)
     # -------------------------------------------------------------------------
-  # -------------------------------------------------------------------------
-# Modo: Cuenta (GL0061) — agora concatena novos uploads ao dataset atual
-# -------------------------------------------------------------------------
     elif mode == "cuenta":
         st.subheader("📘 Importar Archivo de Cuenta (GL0061)")
-    
+
         upl_key = st.session_state["aag_state"].setdefault("uploader_key_cuenta", "aag_cuenta_upl_1")
         uploaded = st.file_uploader("Selecionar arquivo GL0061 (.txt)", type=["txt"], key=upl_key)
-    
+
         col_r, col_c = st.columns([2, 1])
         with col_r:
-            run_clicked = st.button(
-                "▶️ Processar Cuenta",
-                type="primary",
-                use_container_width=True,
-                disabled=(uploaded is None)
-            )
+            run_clicked = st.button("▶️ Processar Cuenta", type="primary", use_container_width=True, disabled=(uploaded is None))
         with col_c:
             clear_clicked = st.button("Limpar", use_container_width=True)
-    
-        # Zera o dataset da Cuenta (volta ao estado vazio)
+
         if clear_clicked:
             st.session_state["aag_state"]["uploader_key_cuenta"] = upl_key + "_x"
             if "aag_cuenta_df" in st.session_state:
                 del st.session_state["aag_cuenta_df"]
-            st.info("Dataset de Cuenta foi limpo. Você pode carregar novos arquivos agora.")
             st.rerun()
-    
-        # Processa e CONCATENA o novo arquivo à base existente (se houver)
+
         if run_clicked and uploaded is not None:
             raw = uploaded.getvalue()
             try:
                 text = raw.decode("utf-8")
             except Exception:
                 text = raw.decode("latin-1")
-    
+
             try:
-                df_new = parse_cuenta_gl(text)
+                df = parse_cuenta_gl(text)
             except Exception as e:
                 st.error("Erro ao interpretar o arquivo GL0061.")
                 st.exception(e)
-                st.stop()
-    
-            if df_new.empty:
+                return
+
+            if df.empty:
                 st.error("Nenhuma linha reconhecida no arquivo GL0061.")
-                st.stop()
-    
-            # Recria 'Chave' para o df recém-lido (mesma regra já usada antes)
-            cta_str   = df_new["CTA"].apply(_str_or_empty) if "CTA" in df_new.columns else pd.Series([""] * len(df_new))
-            fecha_str = df_new["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df_new.columns else pd.Series([""] * len(df_new))
-            tran_str  = df_new["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df_new.columns else pd.Series([""] * len(df_new))
-            sreal_str = df_new["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df_new.columns else pd.Series([""] * len(df_new))
-            df_new["Chave"] = cta_str + "|" + fecha_str + "|" + tran_str + "|" + sreal_str
-    
-            # Concatena com o que já existe no estado (se houver) e remove duplicatas por 'Chave'
-            prev = st.session_state.get("aag_cuenta_df", None)
-    
-            if prev is not None and isinstance(prev, pd.DataFrame) and not prev.empty:
-                before = len(prev)
-                combined = pd.concat([prev, df_new], ignore_index=True)
-    
-                # Remove duplicadas por Chave (se existir). Mantém a 1ª ocorrência.
-                if "Chave" in combined.columns:
-                    combined = combined.drop_duplicates(subset=["Chave"], keep="first")
-    
-                added_effective = len(combined) - before
-            else:
-                combined = df_new.copy()
-                added_effective = len(combined)
-    
-            st.session_state["aag_cuenta_df"] = combined
-    
-            # Feedback visual
-            total_atual = len(st.session_state["aag_cuenta_df"])
-            st.success(
-                f"Arquivo processado. Linhas efetivamente adicionadas: "
-                f"{added_effective:,}".replace(",", ".")
-            )
-            st.caption(
-                f"📊 Total atual de linhas em Cuenta: "
-                f"**{total_atual:,}**".replace(",", ".")
-            )
-    
-        # Visualização e downloads SEMPRE usam o dataset acumulado
+                return
+
+            cta_str = df["CTA"].apply(_str_or_empty) if "CTA" in df.columns else pd.Series([""] * len(df))
+            fecha_str = df["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df.columns else pd.Series([""] * len(df))
+            tran_str = df["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df.columns else pd.Series([""] * len(df))
+            sreal_str = df["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df.columns else pd.Series([""] * len(df))
+
+            df["Chave"] = cta_str + "|" + fecha_str + "|" + tran_str + "|" + sreal_str
+
+            st.session_state["aag_cuenta_df"] = df.copy()
+
         if "aag_cuenta_df" in st.session_state and isinstance(st.session_state["aag_cuenta_df"], pd.DataFrame):
             df = st.session_state["aag_cuenta_df"]
-    
-            # Colunas de data para formatação (se existirem)
+
             date_cols = [c for c in ["Fecha", "Fechado"] if c in df.columns]
             col_cfg = {
                 "Debe": st.column_config.NumberColumn(format="%.2f"),
@@ -1291,26 +1251,13 @@ def render():
             }
             for dc in date_cols:
                 col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
-    
-            # Métricas
-            c1, c2 = st.columns(2)
-            with c1:
-                st.metric("📄 Linhas totais em Cuenta (acumulado)", f"{len(df):,}".replace(",", "."))
-            with c2:
-                # Soma de Debe/Haber se existirem
-                soma_debe = float(pd.to_numeric(df.get("Debe", pd.Series(dtype=float)), errors="coerce").fillna(0).sum())
-                soma_haber = float(pd.to_numeric(df.get("Haber", pd.Series(dtype=float)), errors="coerce").fillna(0).sum())
-                st.metric(
-                    "Σ Débitos / Créditos",
-                    f"{soma_debe:,.2f} / {soma_haber:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-                )
-    
+
             st.dataframe(df, use_container_width=True, height=600, column_config=col_cfg)
-    
+
             col1, col2 = st.columns(2)
             with col1:
                 st.download_button(
-                    "Baixar CSV (Cuenta acumulada)",
+                    "Baixar CSV",
                     df.to_csv(index=False).encode("utf-8"),
                     "cuenta.csv",
                     "text/csv",
@@ -1323,12 +1270,12 @@ def render():
                     date_cols=date_cols
                 )
                 st.download_button(
-                    "Baixar XLSX (Cuenta acumulada)",
+                    "Baixar XLSX",
                     xlsx_bytes,
                     "cuenta.xlsx",
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
-    
-        else:
-            st.info("Carregue um ou mais arquivos GL0061 (.txt) para começar. Cada novo upload será concatenado ao dataset atual.")
+
+    else:
+        st.info("Selecione um modo acima para continuar.")
