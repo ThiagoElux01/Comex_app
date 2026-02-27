@@ -6,6 +6,7 @@ import pandas as pd
 from io import BytesIO
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Font
+from pandas.api.types import is_numeric_dtype  # <-- adicionado
 
 # -----------------------------------------------------------------------------
 # Estado e helpers
@@ -87,6 +88,64 @@ def _fmt_transno_keep_zeros(x, width: int = 9) -> str:
     if not s:
         return ""
     return s.zfill(width)
+
+# ==== Helpers robustos para datas (Excel serial + strings) ====
+_EXCEL_ORIGIN = "1899-12-30"  # origem do Excel (Windows)
+
+def _coerce_excel_serial_to_date(s: pd.Series) -> pd.Series:
+    """Converte valores numéricos (seriais do Excel) para datetime.date."""
+    s_num = pd.to_numeric(s, errors="coerce")
+    dt = pd.to_datetime(s_num, unit="d", origin=_EXCEL_ORIGIN, errors="coerce")
+    return dt.dt.date
+
+def _coerce_str_to_date_dayfirst(s: pd.Series) -> pd.Series:
+    """
+    Converte strings tentando interpretar como dia/mês/ano (dayfirst=True).
+    Faz um segundo passe apenas onde houver NaT.
+    """
+    s_str = s.astype(str).str.strip()
+    dt1 = pd.to_datetime(s_str, errors="coerce", dayfirst=True, infer_datetime_format=True)
+    mask_nan = dt1.isna()
+    if mask_nan.any():
+        s_amb = s_str[mask_nan]
+        dt2 = pd.to_datetime(s_amb, errors="coerce", dayfirst=True, infer_datetime_format=True)
+        dt1.loc[mask_nan] = dt2
+    return dt1.dt.date
+
+def _normalize_date_column(df: pd.DataFrame, col: str) -> pd.Series:
+    """
+    Normaliza a coluna de data vinda da planilha para objetos date,
+    aceitando: serial Excel, strings dd/mm/yyyy, yyyy-mm-dd, mm/dd/yyyy etc.
+    """
+    if col not in df.columns:
+        return pd.Series([pd.NaT] * len(df), index=df.index, dtype="object")
+
+    s = df[col]
+
+    # Caso já venha como datetime/date
+    if pd.api.types.is_datetime64_any_dtype(s) or s.dtype == "datetime64[ns]":
+        return pd.to_datetime(s, errors="coerce", dayfirst=True).dt.date
+
+    # Se vier numérico puro
+    if is_numeric_dtype(s):
+        return _coerce_excel_serial_to_date(s)
+
+    # Pode ser string numérica (serial Excel) misturada com strings de data
+    s_str = s.astype(str).str.strip()
+    is_num_like = s_str.str.match(r"^\d+(\.\d+)?$").fillna(False)
+
+    out = pd.Series(pd.NaT, index=df.index, dtype="object")
+    if is_num_like.any():
+        out[is_num_like] = _coerce_excel_serial_to_date(s_str[is_num_like])
+    if (~is_num_like).any():
+        out[~is_num_like] = _coerce_str_to_date_dayfirst(s_str[~is_num_like])
+
+    return out
+
+def _fmt_date_series_ddmmyyyy(s: pd.Series) -> pd.Series:
+    """Formata uma Series de datas em 'dd/mm/yyyy' (string), preservando vazios."""
+    s_dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
+    return s_dt.dt.strftime("%d/%m/%Y").fillna("")
 
 # -----------------------------------------------------------------------------
 # Limpieza Plantilla Gastos — helper robusto
@@ -724,36 +783,10 @@ def render():
                     st.error("Coluna 'Amount' não encontrada no arquivo.")
                     return
 
-                # Datas na Plantilla
-                def norm(s: str) -> str:
-                    return re.sub(r"[^a-z0-9]", "", str(s).strip().lower())
-
-                date_targets = {
-                    "transactiondate": None,
-                    "due_date": None,
-                    "invoicedate": None,
-                    "invoice_date": None,
-                }
-                found_date_cols = []
-                for c in df_pg.columns:
-                    nc = norm(c)
-                    if nc == "transactiondate":
-                        date_targets["transactiondate"] = c
-                    elif nc in ("duedate", "due_date"):
-                        date_targets["due_date"] = c
-                    elif nc in ("invoicedate", "invoice_date"):
-                        if date_targets.get("invoicedate") is None:
-                            date_targets["invoicedate"] = c
-
-                for key, col in date_targets.items():
-                    if col and col in df_pg.columns:
-                        df_pg[col] = pd.to_datetime(df_pg[col], errors="coerce", dayfirst=True).dt.date
-                        found_date_cols.append(col)
-
                 # Amount numérico
                 df_pg[amount_col] = pd.to_numeric(df_pg[amount_col], errors="coerce")
 
-                # Criar 'Chave' na Plantilla
+                # Helper para achar colunas por variações de nome
                 def _find_col_ci(df: pd.DataFrame, targets: list[str]):
                     cols_map = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in df.columns}
                     for t in targets:
@@ -761,24 +794,48 @@ def render():
                         if key in cols_map:
                             return cols_map[key]
                     return None
-                
+
+                # Colunas principais para compor a 'Chave'
                 cuenta_col    = _find_col_ci(df_pg, ["Cuenta"])
-                tdate_col     = _find_col_ci(df_pg, ["TransactionDate", "Transaction Date", "TransDate"])
                 tno_col       = _find_col_ci(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
                 amount_col_ci = amount_col
-                
-                tdate_str  = df_pg[tdate_col].apply(_fmt_date_ddmmyyyy) if tdate_col else ""
+
+                # --- Normalização robusta das colunas de data ---
+                def norm(s: str) -> str:
+                    return re.sub(r"[^a-z0-9]", "", str(s).strip().lower())
+
+                # Aceita variações: TransactionDate, DueDate/Due Date, InvoiceDate/Invoice Date
+                date_targets = {"transactiondate": None, "duedate": None, "invoicedate": None}
+                for c in df_pg.columns:
+                    nc = norm(c)
+                    if nc == "transactiondate":
+                        date_targets["transactiondate"] = c
+                    elif nc in ("duedate", "due_date"):
+                        date_targets["duedate"] = c
+                    elif nc in ("invoicedate", "invoice_date"):
+                        date_targets["invoicedate"] = c
+
+                found_date_cols = []
+                for key, col in date_targets.items():
+                    if col and col in df_pg.columns:
+                        df_pg[col] = _normalize_date_column(df_pg, col)  # vira objetos date
+                        found_date_cols.append(col)
+
+                # Criar 'Chave' na Plantilla (datas sempre em dd/mm/aaaa)
+                tdate_col = date_targets.get("transactiondate")
+                tdate_str = _fmt_date_series_ddmmyyyy(df_pg[tdate_col]) if tdate_col else pd.Series([""] * len(df_pg))
+
                 tno_str    = df_pg[tno_col].apply(_fmt_transno_keep_zeros) if tno_col else ""
                 cuenta_str = df_pg[cuenta_col].apply(_str_or_empty) if cuenta_col else ""
                 amount_str = df_pg[amount_col_ci].apply(_fmt_num_2dec_point) if amount_col_ci else ""
-                
+
                 df_pg["Chave"] = (
                     (cuenta_str if isinstance(cuenta_str, pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
                     (tdate_str  if isinstance(tdate_str,  pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
                     (tno_str    if isinstance(tno_str,    pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
                     (amount_str if isinstance(amount_str, pd.Series) else pd.Series([""]*len(df_pg)))
                 )
-                
+
                 st.session_state["aag_plantilla_df"] = df_pg.copy()
 
                 pbar.progress(70, text="Preparando visualização...")
