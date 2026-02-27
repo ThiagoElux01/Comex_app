@@ -41,6 +41,40 @@ def _set_mode(mode: str):
 
 # ==== Helpers de formatação para 'Chave' ====
 
+# ==== Padronização única da CHAVE (usada em Plantilla e Cuenta) ====
+
+def _norm_account(x) -> str:
+    """Conta como string limpa, preservando zeros à esquerda (ex.: '012345')."""
+    if x is None:
+        return ""
+    s = str(x).strip()
+    # remove tudo que não for dígito; NÃO remove zeros à esquerda
+    s = re.sub(r"\D", "", s)
+    return s
+
+def _norm_transno(x, width: int = 9) -> str:
+    """Transacción/TransactionNo apenas dígitos, zero à esquerda em width fixo."""
+    return _fmt_transno_keep_zeros(x, width=width)
+
+def _norm_date_ddmmyyyy(x) -> str:
+    """Data para dd/mm/yyyy como texto."""
+    return _fmt_date_ddmmyyyy(x)
+
+def _norm_amount_2dec_point(x) -> str:
+    """Número com 2 decimais, ponto como separador decimal, sem milhar."""
+    return _fmt_num_2dec_point(x)
+
+def build_chave(cuenta, fecha, trans, amount) -> str:
+    """
+    Constrói a Chave com o MESMO padrão para PG e Cuenta:
+    <Cuenta>\n<dd/mm/yyyy>\n<Trans 9 dígitos>\n<valor com 2 decimais .>
+    """
+    cta = _norm_account(cuenta)
+    dt  = _norm_date_ddmmyyyy(fecha)
+    tr  = _norm_transno(trans, width=9)
+    am  = _norm_amount_2dec_point(amount)
+    return f"{cta}\n{dt}\n{tr}\n{am}"
+    
 def _fmt_date_ddmmyyyy(value) -> str:
     """Converte vários tipos de data para 'dd/mm/aaaa' como string."""
     if pd.isna(value):
@@ -974,22 +1008,26 @@ def render():
                 def _ensure_series(x, n):
                     return x if isinstance(x, pd.Series) else pd.Series([""] * n)
 
-                df_pg["Chave"] = (
-                    _ensure_series(cuenta_str, len(df_pg)) + "|" +
-                    _ensure_series(tdate_str, len(df_pg)) + "|" +
-                    _ensure_series(tno_str, len(df_pg)) + "|" +
-                    _ensure_series(amount_str, len(df_pg))
+                # --- Localiza colunas base ---
+                cuenta_col = _find_col_ci(df_pg, ["Cuenta"])
+                tno_col    = _find_col_ci(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
+                
+                # Datas normalizadas (já estão convertidas para datetime pelos steps anteriores)
+                tdate_col = date_targets.get("transactiondate")
+                if tdate_col:
+                    df_pg[tdate_col] = _to_datetime_from_mixed_excel_and_strings(df_pg[tdate_col])
+                
+                # Amount numérico (já feito antes), mas garantimos coerção
+                amount_col_ci = amount_col
+                df_pg[amount_col_ci] = pd.to_numeric(df_pg[amount_col_ci], errors="coerce")
+                
+                # --- MONTA CHAVE padronizada ---
+                df_pg["Chave"] = build_chave(
+                    df_pg[cuenta_col] if cuenta_col else "",
+                    df_pg[tdate_col]  if tdate_col  else "",
+                    df_pg[tno_col]    if tno_col    else "",
+                    df_pg[amount_col_ci] if amount_col_ci else ""
                 )
-
-                st.session_state["aag_plantilla_df_orig"] = df_pg.copy()
-
-                pbar.progress(70, text="Preparando visualização...")
-                st.success("Arquivo carregado com sucesso.")
-                pbar.progress(100, text="Concluído.")
-            except Exception as e:
-                st.error("Erro ao processar o arquivo Excel.")
-                st.exception(e)
-
         # Exibição e downloads
         if "aag_plantilla_df_orig" in st.session_state and isinstance(st.session_state["aag_plantilla_df_orig"], pd.DataFrame):
             df_pg = st.session_state["aag_plantilla_df_orig"]
@@ -1192,7 +1230,7 @@ def render():
             st.exception(e)
     
     # -------------------------------------------------------------------------
-    # Modo: Cuenta (GL0061)  >>> SUPORTE A VÁRIOS ARQUIVOS + DEDUPE POR Chave
+    # Modo: Cuenta (GL0061)  — múltiplos arquivos + dedupe por partes + CHAVE padrão
     # -------------------------------------------------------------------------
     elif mode == "cuenta":
         st.subheader("📘 Importar Archivo de Cuenta (GL0061)")
@@ -1218,10 +1256,9 @@ def render():
     
         if clear_clicked:
             st.session_state["aag_state"]["uploader_key_cuenta"] = upl_key + "_x"
-            if "aag_cuenta_df" in st.session_state:
-                del st.session_state["aag_cuenta_df"]
-            if "aag_cuenta_dups" in st.session_state:
-                del st.session_state["aag_cuenta_dups"]
+            for k in ("aag_cuenta_df", "aag_cuenta_dups"):
+                if k in st.session_state:
+                    del st.session_state[k]
             st.rerun()
     
         if run_clicked and uploaded_files:
@@ -1235,7 +1272,6 @@ def render():
                     except Exception:
                         text = raw.decode("latin-1")
     
-                    # parse individual
                     try:
                         df_i = parse_cuenta_gl(text)
                     except Exception as e:
@@ -1247,17 +1283,13 @@ def render():
                         st.warning(f"Nenhuma linha reconhecida no arquivo: {getattr(uploaded, 'name', '(sem nome)')}")
                         continue
     
-                    # monta Chave para o arquivo atual
-                    cta_str  = df_i["CTA"].apply(_str_or_empty) if "CTA" in df_i.columns else pd.Series([""] * len(df_i))
-                    fecha_str = df_i["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df_i.columns else pd.Series([""] * len(df_i))
-                    tran_str  = df_i["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df_i.columns else pd.Series([""] * len(df_i))
-                    sreal_str = df_i["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df_i.columns else pd.Series([""] * len(df_i))
-    
-                    df_i["Chave"] = cta_str + "\n" + fecha_str + "\n" + tran_str + "\n" + sreal_str
-    
-                    # rastreabilidade (opcional)
                     df_i["_Archivo"] = getattr(uploaded, "name", "")
+                    # Garante tipos/colunas
+                    for c in ["Debe", "Haber", "Saldo Real", "Saldo"]:
+                        if c in df_i.columns:
+                            df_i[c] = pd.to_numeric(df_i[c], errors="coerce")
     
+                    # **Não** monta Chave ainda; faremos após concatenar e deduplicar por partes
                     dfs.append(df_i)
     
                     prog = int(100 * (idx / max(len(uploaded_files), 1)))
@@ -1267,35 +1299,51 @@ def render():
                     st.error("Nenhum dado válido foi encontrado nos arquivos enviados.")
                     return
     
-                # --- Consolida e remove duplicatas por Chave ---
+                # Concatena
                 df_all = pd.concat(dfs, ignore_index=True)
     
-                # garante numéricos
-                for c in ["Debe", "Haber", "Saldo Real", "Saldo"]:
-                    if c in df_all.columns:
-                        df_all[c] = pd.to_numeric(df_all[c], errors="coerce")
+                # --- DEDUPE POR PARTES (mais robusto que por texto) ---
+                # Partes que definem a unicidade da linha no GL0061:
+                #   CTA, Fecha, Transacción, Saldo Real
+                # 1) Normaliza as partes para o mesmo formato que a Chave usará
+                cta_part   = _norm_account(df_all["CTA"]) if "CTA" in df_all.columns else ""
+                fecha_part = pd.to_datetime(df_all["Fecha"], errors="coerce", dayfirst=True) if "Fecha" in df_all.columns else pd.NaT
+                tran_part  = df_all["Transacción"].apply(_norm_transno) if "Transacción" in df_all.columns else ""
+                sreal_part = pd.to_numeric(df_all["Saldo Real"], errors="coerce") if "Saldo Real" in df_all.columns else 0.0
     
-                # identifica duplicatas (mesma Chave) que surgem com múltiplos arquivos
-                dups_mask = df_all.duplicated(subset=["Chave"], keep="first")
-                dups_count = int(dups_mask.sum())
+                df_all["_CTA_norm"]   = cta_part
+                df_all["_Fecha_norm"] = fecha_part
+                df_all["_Tran_norm"]  = tran_part
+                df_all["_SReal_norm"] = sreal_part
+    
+                dups_mask = df_all.duplicated(subset=["_CTA_norm", "_Fecha_norm", "_Tran_norm", "_SReal_norm"], keep="first")
                 df_dups = df_all.loc[dups_mask].copy()
+                df_all = df_all.loc[~dups_mask].copy().reset_index(drop=True)
     
-                # aplica dedupe para que a contagem por Chave não infle e atrapalhe a limpeza
-                df_all = df_all.drop_duplicates(subset=["Chave"], keep="first").reset_index(drop=True)
+                # --- RECONSTRÓI A CHAVE PADRÃO (agora, com as partes normais) ---
+                df_all["Chave"] = build_chave(
+                    df_all["_CTA_norm"],
+                    df_all["_Fecha_norm"],
+                    df_all["_Tran_norm"],
+                    df_all["_SReal_norm"],
+                )
+    
+                # Limpa colunas auxiliares
+                df_all.drop(columns=["_CTA_norm", "_Fecha_norm", "_Tran_norm", "_SReal_norm"], inplace=True)
     
                 st.session_state["aag_cuenta_df"] = df_all.copy()
-                st.session_state["aag_cuenta_dups"] = df_dups if dups_count > 0 else pd.DataFrame()
+                st.session_state["aag_cuenta_dups"] = df_dups if not df_dups.empty else pd.DataFrame()
     
                 pbar.progress(100, text="Concluído.")
-                st.success(f"{len(dfs)} arquivo(s) processado(s) e consolidado(s).")
-                if dups_count > 0:
-                    st.info(f"Detectadas **{dups_count:,}** duplicatas por **Chave** no GL0061 consolidado — descartadas para a limpeza.")
+                st.success(f"{len(uploaded_files)} arquivo(s) processado(s) e consolidado(s).")
+                if not df_dups.empty:
+                    st.info(f"Duplicatas iguais por partes (CTA, Fecha, Transacción, Saldo Real): {len(df_dups):,}".replace(",", "."))
     
             except Exception as e:
                 st.error("Erro ao processar os arquivos GL0061.")
                 st.exception(e)
     
-        # Exibição / download do consolidado
+        # Exibição / download
         if "aag_cuenta_df" in st.session_state and isinstance(st.session_state["aag_cuenta_df"], pd.DataFrame):
             df = st.session_state["aag_cuenta_df"]
     
@@ -1309,50 +1357,32 @@ def render():
             for dc in date_cols:
                 col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
     
-            # métricas rápidas
             m1, m2, m3 = st.columns(3)
-            with m1:
-                st.metric("Linhas (consolidado sem duplicatas)", f"{len(df):,}".replace(",", "."))
-            with m2:
-                st.metric("CTAs distintas", f"{df['CTA'].nunique():,}".replace(",", ".") if "CTA" in df.columns else "—")
+            with m1: st.metric("Linhas (consolidado)", f"{len(df):,}".replace(",", "."))
+            with m2: st.metric("CTAs distintas", f"{df['CTA'].nunique():,}".replace(",", ".") if "CTA" in df.columns else "—")
             with m3:
                 dups_log = st.session_state.get("aag_cuenta_dups", pd.DataFrame())
-                st.metric("Duplicatas por Chave (descartadas)", f"{len(dups_log):,}".replace(",", "."))
+                st.metric("Duplicatas descartadas", f"{len(dups_log):,}".replace(",", "."))
     
             st.dataframe(df, use_container_width=True, height=600, column_config=col_cfg)
     
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.download_button(
-                    "Baixar CSV (Cuenta consolidada)",
-                    df.to_csv(index=False).encode("utf-8"),
-                    "cuenta_consolidada.csv",
-                    "text/csv",
-                    use_container_width=True
-                )
+                st.download_button("Baixar CSV (Cuenta consolidada)", df.to_csv(index=False).encode("utf-8"),
+                                   "cuenta_consolidada.csv", "text/csv", use_container_width=True)
             with col2:
                 xlsx_bytes = to_xlsx_bytes_format(
                     df, "Cuenta",
                     numeric_cols=["Debe", "Haber", "Saldo Real", "Saldo"],
                     date_cols=date_cols
                 )
-                st.download_button(
-                    "Baixar XLSX (Cuenta consolidada)",
-                    xlsx_bytes,
-                    "cuenta_consolidada.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
+                st.download_button("Baixar XLSX (Cuenta consolidada)", xlsx_bytes, "cuenta_consolidada.xlsx",
+                                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                   use_container_width=True)
             with col3:
-                # download opcional do log de duplicatas
                 dups_log = st.session_state.get("aag_cuenta_dups", pd.DataFrame())
-                st.download_button(
-                    "Baixar log de duplicatas (opcional)",
-                    dups_log.to_csv(index=False).encode("utf-8"),
-                    "cuenta_duplicatas_por_chave.csv",
-                    "text/csv",
-                    use_container_width=True,
-                    disabled=dups_log.empty
-                )
-    else:
+                st.download_button("Baixar log de duplicatas", dups_log.to_csv(index=False).encode("utf-8"),
+                                   "cuenta_duplicatas.csv", "text/csv", use_container_width=True,
+                                   disabled=dups_log.empty)
+
         st.info("Selecione um modo acima para continuar.")
