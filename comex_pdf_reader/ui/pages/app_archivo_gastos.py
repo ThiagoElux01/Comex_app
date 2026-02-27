@@ -42,7 +42,7 @@ def _fmt_date_ddmmyyyy(value) -> str:
     if pd.isna(value):
         return ""
     try:
-        dt = pd.to_datetime(value, errors="coerce", dayfirst=True)  # coerência dd/mm
+        dt = pd.to_datetime(value, errors="coerce")  # formato ISO já é entendido
         if pd.isna(dt):
             return ""
         return dt.strftime("%d/%m/%Y")
@@ -86,23 +86,6 @@ def _fmt_transno_keep_zeros(x, width: int = 9) -> str:
         return ""
     return s.zfill(width)
 
-def _fmt_transno_keep_zeros_series(s: pd.Series, width: int = 9) -> pd.Series:
-    """Versão vetorizada para grandes volumes."""
-    # Tenta numérico direto (pega 18528, 18528.0, etc.)
-    s_num = pd.to_numeric(s, errors="coerce")
-    out = pd.Series("", index=s.index, dtype="object")
-    mask_num = s_num.notna()
-    out.loc[mask_num] = s_num.loc[mask_num].round().astype("Int64").astype(str)
-
-    # Para o restante, remove não-dígitos
-    s_str = s.astype(str)
-    out.loc[~mask_num] = s_str.loc[~mask_num].str.replace(r"\D", "", regex=True)
-
-    # Pad com zeros e limpa vazios
-    out = out.fillna("")
-    out = out.map(lambda z: z.zfill(width) if z else "")
-    return out
-
 # ==== Helpers robustos para datas na PLANTILLA ====
 _EXCEL_ORIGIN = "1899-12-30"  # origem do Excel (Windows)
 
@@ -112,8 +95,9 @@ def _to_datetime_from_mixed_excel_and_strings(s: pd.Series) -> pd.Series:
     tratando 3 casos:
       1) seriais Excel (número puro ou string numérica) -> origin 1899-12-30
       2) strings ISO (ex.: '2026-01-02 00:00:00') -> pd.to_datetime padrão
-      3) outras strings -> tentativa com dayfirst=True
+      3) outras strings -> tentativa genérica de parse
     """
+    # 1) Tenta converter seriais (numérico)
     s_str = s.astype(str).str.strip()
     is_num_like = s_str.str.match(r"^\d+(\.\d+)?$").fillna(False)
     dt = pd.Series(pd.NaT, index=s.index, dtype="datetime64[ns]")
@@ -122,23 +106,27 @@ def _to_datetime_from_mixed_excel_and_strings(s: pd.Series) -> pd.Series:
         s_num = pd.to_numeric(s_str[is_num_like], errors="coerce")
         dt.loc[is_num_like] = pd.to_datetime(s_num, unit="d", origin=_EXCEL_ORIGIN, errors="coerce")
 
+    # 2) Para o restante, remove o sufixo ' HH:MM:SS' se existir e faz parse padrão
     rest = ~is_num_like
     if rest.any():
         s_rem = s_str[rest].str.replace(r"\s+\d{2}:\d{2}:\d{2}$", "", regex=True)
-        dt1 = pd.to_datetime(s_rem, errors="coerce", dayfirst=True)
+        # Primeiro passe: pd.to_datetime padrão (ISO funciona direto)
+        dt1 = pd.to_datetime(s_rem, errors="coerce")
         dt.loc[rest] = dt1
 
+        # Fallback (pouco provável aqui): tenta mais uma vez
         still = dt1.isna()
         if still.any():
             s2 = s_rem[still]
-            dt2 = pd.to_datetime(s2, errors="coerce", dayfirst=True)
+            dt2 = pd.to_datetime(s2, errors="coerce")
             dt.loc[s2.index] = dt2
 
     return dt
 
+
 def _fmt_date_series_ddmmyyyy(s: pd.Series) -> pd.Series:
     """Formata uma Series de datas em 'dd/mm/yyyy' como texto para compor a Chave."""
-    s_dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
+    s_dt = pd.to_datetime(s, errors="coerce")
     return s_dt.dt.strftime("%d/%m/%Y").fillna("")
 
 # -----------------------------------------------------------------------------
@@ -249,7 +237,6 @@ def _clean_num(s: str) -> float | None:
     s = str(s).strip()
     if s == "":
         return None
-    # Trata casos com duplo sinal: prioriza o final (padrão do relatório)
     neg = s.endswith("-")
     s = s[:-1] if neg else s
     s = s.replace(",", "")
@@ -307,6 +294,7 @@ def parse_estado_cuenta_txt(texto: str) -> pd.DataFrame:
 # -----------------------------------------------------------------------------
 # PARSER GL0061 — colunas fixas
 # -----------------------------------------------------------------------------
+
 def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     """
     Parser para arquivos GL0061 (colunas fixas em linha), com:
@@ -360,8 +348,7 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
             continue
         if len(ln.strip()) == 0:
             continue
-        # aceita 2 ou 4 dígitos no ano
-        if not re.search(r"\d{2}/\d{2}/\d{2,4}", ln):
+        if not re.search(r"\d{2}/\d{2}/\d{2}", ln):
             continue
 
         cc     = ln[0:5].strip()
@@ -403,8 +390,9 @@ def parse_cuenta_gl(texto: str) -> pd.DataFrame:
     return df
 
 # -----------------------------------------------------------------------------
-# Export XLSX
+# Export XLSX com máscara numérica e data
 # -----------------------------------------------------------------------------
+
 def to_xlsx_bytes_format(
     df: pd.DataFrame,
     sheet_name: str,
@@ -471,53 +459,10 @@ def to_xlsx_bytes_format(
     buffer.seek(0)
     return buffer.getvalue()
 
-def to_xlsx_bytes_quick(df: pd.DataFrame, sheet_name: str) -> bytes:
-    """
-    Versão rápida de exportação (sem formatação célula a célula).
-    Ideal para arquivos grandes.
-    """
-    buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name=sheet_name)
-    buffer.seek(0)
-    return buffer.getvalue()
-
-# -----------------------------------------------------------------------------
-# Helpers de leitura otimizada do Excel
-# -----------------------------------------------------------------------------
-def _choose_excel_engine(file_name: str) -> str:
-    """
-    Tenta usar 'pyarrow' (muito rápido) para .xlsx; se falhar, cai para 'openpyxl'.
-    Para .xls, usa 'xlrd'.
-    """
-    name = (file_name or "").lower()
-    if name.endswith(".xls"):
-        return "xlrd"
-    # xlsx
-    try:
-        # pandas usa pyarrow se estiver instalado
-        import importlib
-        importlib.import_module("pyarrow")
-        return "pyarrow"
-    except Exception:
-        return "openpyxl"
-
-def _find_col_ci(df: pd.DataFrame, targets: list[str]):
-    """
-    Busca coluna por nomes-alvo com normalização (case-insensitive e sem símbolos).
-    Retorna o nome original da coluna no DataFrame ou None.
-    """
-    norm = lambda s: re.sub(r"[^a-z0-9]", "", str(s).lower())
-    cols_map = {norm(c): c for c in df.columns}
-    for t in targets:
-        key = norm(t)
-        if key in cols_map:
-            return cols_map[key]
-    return None
-
 # -----------------------------------------------------------------------------
 # Página
 # -----------------------------------------------------------------------------
+
 def render():
     _ensure_state()
     st.subheader("Aplicación Archivo Gastos")
@@ -605,26 +550,15 @@ def render():
                     else:
                         col_cfg[dc] = st.column_config.TextColumn()
 
-                # Prévia limitada
-                n_preview = st.number_input("Linhas na prévia", min_value=100, max_value=5000, value=1000, step=100)
-                st.dataframe(df_pg_prev.head(n_preview), use_container_width=True, height=520, column_config=col_cfg)
+                st.dataframe(df_pg_prev, use_container_width=True, height=520, column_config=col_cfg)
 
-                col_csv, col_xlsx_fast, col_xlsx = st.columns(3)
+                col_csv, col_xlsx = st.columns(2)
                 with col_csv:
                     st.download_button(
                         "Baixar CSV (Plantilla Limpia)",
                         df_pg_prev.to_csv(index=False).encode("utf-8"),
                         "plantilla_gastos_limpia.csv",
                         "text/csv",
-                        use_container_width=True
-                    )
-                with col_xlsx_fast:
-                    xlsx_bytes_fast = to_xlsx_bytes_quick(df_pg_prev, sheet_name="PlantillaGastos (Limpia)")
-                    st.download_button(
-                        "XLSX Rápido (Limpia)",
-                        xlsx_bytes_fast,
-                        "plantilla_gastos_limpia_rapido.xlsx",
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
                 with col_xlsx:
@@ -635,7 +569,7 @@ def render():
                         date_cols=[c for c in df_pg_prev.columns if pd.api.types.is_datetime64_any_dtype(df_pg_prev[c]) or c in found_date_cols_view],
                     )
                     st.download_button(
-                        "XLSX Formatado (Limpia)",
+                        "Baixar XLSX (Plantilla Limpia)",
                         xlsx_bytes,
                         "plantilla_gastos_limpia.xlsx",
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -714,7 +648,7 @@ def render():
             df = pd.concat([df, pd.DataFrame([total_row], columns=df.columns)], ignore_index=True)
 
             st.dataframe(
-                df.head(2000),  # prévia limitada
+                df,
                 use_container_width=True,
                 height=550,
                 column_config={c: st.column_config.NumberColumn(format="%.2f") for c in numeric_cols if c in df.columns},
@@ -756,12 +690,6 @@ def render():
             help="As colunas de data serão convertidas para dd/mm/aaaa e Amount formatado como número.",
         )
 
-        # Modo rápido: não mostra prévia, só processa e habilita download
-        modo_rapido = st.checkbox("Modo rápido (não mostrar prévia completa)", value=True)
-
-        # Linhas na prévia (quando não estiver em modo rápido)
-        n_preview = st.number_input("Linhas na prévia", min_value=200, max_value=5000, value=2000, step=200, disabled=modo_rapido)
-
         col_run, col_clear = st.columns([2, 1])
         with col_run:
             run_clicked = st.button("▶️ Executar", type="primary", use_container_width=True, disabled=(uploaded_xl is None))
@@ -775,75 +703,85 @@ def render():
             st.rerun()
 
         if run_clicked and uploaded_xl is not None:
-            pbar = st.progress(0, text="Detectando colunas...")
+            pbar = st.progress(0, text="Lendo arquivo Excel...")
             try:
-                # 1) Escolhe engine mais rápida disponível
-                engine = _choose_excel_engine(getattr(uploaded_xl, "name", ""))
+                name = getattr(uploaded_xl, "name", "").lower()
+                engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
 
-                # 2) Lê somente cabeçalho para mapear colunas (rápido)
-                header_df = pd.read_excel(uploaded_xl, sheet_name=0, engine=engine, nrows=0)
-                cols = list(header_df.columns)
+                # Lê como texto para preservar zeros à esquerda (Amount e datas tratadas depois)
+                df_pg = pd.read_excel(uploaded_xl, sheet_name=0, engine=engine, dtype=str)
 
-                # Localiza colunas alvo
-                amount_col = _find_col_ci(header_df, ["Amount"])
-                cuenta_col = _find_col_ci(header_df, ["Cuenta"])
-                tno_col = _find_col_ci(header_df, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
-                # Datas: preferimos TransactionDate; DueDate e InvoiceDate ficam disponíveis para exibição/export
-                tdate_col = _find_col_ci(header_df, ["TransactionDate"])
-                duedate_col = _find_col_ci(header_df, ["DueDate", "Due_Date"])
-                invdate_col = _find_col_ci(header_df, ["InvoiceDate", "Invoice_Date"])
-
+                # Detecta coluna Amount (case-insensitive)
+                amount_col = None
+                for c in df_pg.columns:
+                    if str(c).strip().lower() == "amount":
+                        amount_col = c
+                        break
                 if amount_col is None:
-                    # fallback por substring (primeiro candidato)
-                    candidates = [c for c in cols if "amount" in str(c).lower()]
-                    amount_col = candidates[0] if candidates else None
-
+                    candidates = [c for c in df_pg.columns if "amount" in str(c).strip().lower()]
+                    if candidates:
+                        amount_col = candidates[0]
                 if amount_col is None:
                     st.error("Coluna 'Amount' não encontrada no arquivo.")
                     return
 
-                # 3) Define usecols mínimos para processamento (economiza memória/tempo)
-                usecols = []
-                for c in [amount_col, cuenta_col, tno_col, tdate_col, duedate_col, invdate_col]:
-                    if c is not None:
-                        usecols.append(c)
-                # Garante unicidade
-                usecols = list(dict.fromkeys(usecols))
-
-                pbar.progress(20, text="Lendo Excel (colunas necessárias)...")
-                df_pg = pd.read_excel(uploaded_xl, sheet_name=0, engine=engine, usecols=usecols)
-
-                # 4) Converte Amount p/ numérico (vetorizado)
+                # Amount numérico
                 df_pg[amount_col] = pd.to_numeric(df_pg[amount_col], errors="coerce")
 
-                # 5) Datas -> datetime coerente (dd/mm) para compor Chave
+                # --- Normalização de datas APENAS na Plantilla (forçar dd/mm/yyyy na Chave) ---
+                def norm(s: str) -> str:
+                    return re.sub(r"[^a-z0-9]", "", str(s).strip().lower())
+
+                # Localiza colunas alvo
+                date_targets = {"transactiondate": None, "duedate": None, "invoicedate": None}
+                for c in df_pg.columns:
+                    nc = norm(c)
+                    if nc == "transactiondate":
+                        date_targets["transactiondate"] = c
+                    elif nc in ("duedate", "due_date"):
+                        date_targets["duedate"] = c
+                    elif nc in ("invoicedate", "invoice_date"):
+                        date_targets["invoicedate"] = c
+
                 found_date_cols = []
-                if tdate_col and tdate_col in df_pg.columns:
-                    df_pg[tdate_col] = _to_datetime_from_mixed_excel_and_strings(df_pg[tdate_col])
-                    found_date_cols.append(tdate_col)
-                if duedate_col and duedate_col in df_pg.columns:
-                    df_pg[duedate_col] = _to_datetime_from_mixed_excel_and_strings(df_pg[duedate_col])
-                    found_date_cols.append(duedate_col)
-                if invdate_col and invdate_col in df_pg.columns:
-                    df_pg[invdate_col] = _to_datetime_from_mixed_excel_and_strings(df_pg[invdate_col])
-                    found_date_cols.append(invdate_col)
+                for key, col in date_targets.items():
+                    if col and col in df_pg.columns:
+                        # Converte qualquer mistura (serial Excel, '2026-01-02 00:00:00', etc.) -> datetime64[ns]
+                        df_pg[col] = _to_datetime_from_mixed_excel_and_strings(df_pg[col])
+                        found_date_cols.append(col)
 
-                # 6) Componentes da Chave (vetorizados)
+                # Helper para achar colunas por variações de nome
+                def _find_col_ci(df: pd.DataFrame, targets: list[str]):
+                    cols_map = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in df.columns}
+                    for t in targets:
+                        key = re.sub(r"[^a-z0-9]", "", t.lower())
+                        if key in cols_map:
+                            return cols_map[key]
+                    return None
+
+                cuenta_col    = _find_col_ci(df_pg, ["Cuenta"])
+                tno_col       = _find_col_ci(df_pg, ["TransactionNo", "Transaction No", "TransNo", "Transaction_Number"])
+                amount_col_ci = amount_col
+
+                # Formata data da CHAVE explicitamente em dd/mm/yyyy
+                tdate_col = date_targets.get("transactiondate")
                 tdate_str = _fmt_date_series_ddmmyyyy(df_pg[tdate_col]) if tdate_col else pd.Series([""] * len(df_pg))
-                tno_str   = _fmt_transno_keep_zeros_series(df_pg[tno_col]) if tno_col else pd.Series([""] * len(df_pg))
-                cuenta_str = (
-                    df_pg[cuenta_col].astype(str).str.strip().fillna("")
-                    if cuenta_col else pd.Series([""] * len(df_pg))
-                )
-                # Amount já é numérico; formata em texto para Chave
-                amt_str = df_pg[amount_col].map(lambda v: f"{float(v):.2f}" if pd.notna(v) else "")
 
-                df_pg["Chave"] = cuenta_str + "|" + tdate_str + "|" + tno_str + "|" + amt_str
+                tno_str    = df_pg[tno_col].apply(_fmt_transno_keep_zeros) if tno_col else ""
+                cuenta_str = df_pg[cuenta_col].apply(_str_or_empty) if cuenta_col else ""
+                amount_str = df_pg[amount_col_ci].apply(_fmt_num_2dec_point) if amount_col_ci else ""
+
+                df_pg["Chave"] = (
+                    (cuenta_str if isinstance(cuenta_str, pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
+                    (tdate_str  if isinstance(tdate_str,  pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
+                    (tno_str    if isinstance(tno_str,    pd.Series) else pd.Series([""]*len(df_pg))) + "|" +
+                    (amount_str if isinstance(amount_str, pd.Series) else pd.Series([""]*len(df_pg)))
+                )
 
                 st.session_state["aag_plantilla_df"] = df_pg.copy()
 
-                pbar.progress(80, text="Preparando visualização e downloads...")
-                st.success("Plantilla processada com sucesso.")
+                pbar.progress(70, text="Preparando visualização...")
+                st.success("Arquivo carregado com sucesso.")
                 pbar.progress(100, text="Concluído.")
             except Exception as e:
                 st.error("Erro ao processar o arquivo Excel.")
@@ -875,27 +813,15 @@ def render():
                 else:
                     col_cfg[dc] = st.column_config.TextColumn()
 
-            if not modo_rapido:
-                st.dataframe(df_pg.head(int(n_preview)), use_container_width=True, height=550, column_config=col_cfg)
-            else:
-                st.info("Modo rápido ativado: prévia completa desativada para evitar travamentos.")
+            st.dataframe(df_pg, use_container_width=True, height=550, column_config=col_cfg)
 
-            col_csv, col_xlsx_fast, col_xlsx = st.columns(3)
+            col_csv, col_xlsx = st.columns(2)
             with col_csv:
                 st.download_button(
                     label="Baixar CSV (Plantilla Gastos)",
                     data=df_pg.to_csv(index=False).encode("utf-8"),
                     file_name="plantilla_gastos.csv",
                     mime="text/csv",
-                    use_container_width=True,
-                )
-            with col_xlsx_fast:
-                xlsx_bytes_fast = to_xlsx_bytes_quick(df_pg, sheet_name="PlantillaGastos")
-                st.download_button(
-                    label="XLSX Rápido (Plantilla)",
-                    data=xlsx_bytes_fast,
-                    file_name="plantilla_gastos_rapido.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                 )
             with col_xlsx:
@@ -906,7 +832,7 @@ def render():
                     date_cols=[c for c in df_pg.columns if pd.api.types.is_datetime64_any_dtype(df_pg[c]) or c in found_date_cols_view],
                 )
                 st.download_button(
-                    label="XLSX Formatado (Plantilla)",
+                    label="Baixar XLSX (Plantilla Gastos)",
                     data=xlsx_bytes,
                     file_name="plantilla_gastos.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1032,7 +958,7 @@ def render():
             df_show = df_show[["Cuenta", "Saldo_Estado_Cuenta", "Saldo_Plantilla_Gastos", "Diferença"]]
 
             st.dataframe(
-                df_show.head(5000),
+                df_show,
                 use_container_width=True, height=520,
                 column_config={
                     "Saldo_Estado_Cuenta": st.column_config.NumberColumn(format="%.2f"),
@@ -1114,12 +1040,11 @@ def render():
 
             cta_str   = df["CTA"].apply(_str_or_empty) if "CTA" in df.columns else pd.Series([""]*len(df))
             fecha_str = df["Fecha"].apply(_fmt_date_ddmmyyyy) if "Fecha" in df.columns else pd.Series([""]*len(df))
-            # Vetorizado para transacción
-            tran_str  = _fmt_transno_keep_zeros_series(df["Transacción"]) if "Transacción" in df.columns else pd.Series([""]*len(df))
-            sreal_str = df["Saldo Real"].map(lambda v: f"{float(v):.2f}" if pd.notna(v) else "") if "Saldo Real" in df.columns else pd.Series([""]*len(df))
-
+            tran_str  = df["Transacción"].apply(_fmt_transno_keep_zeros) if "Transacción" in df.columns else pd.Series([""]*len(df))
+            sreal_str = df["Saldo Real"].apply(_fmt_num_2dec_point) if "Saldo Real" in df.columns else pd.Series([""]*len(df))
+            
             df["Chave"] = cta_str + "|" + fecha_str + "|" + tran_str + "|" + sreal_str
-
+            
             st.session_state["aag_cuenta_df"] = df.copy()
 
         if "aag_cuenta_df" in st.session_state and isinstance(st.session_state["aag_cuenta_df"], pd.DataFrame):
@@ -1135,9 +1060,9 @@ def render():
             for dc in date_cols:
                 col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
 
-            st.dataframe(df.head(5000), use_container_width=True, height=600, column_config=col_cfg)
+            st.dataframe(df, use_container_width=True, height=600, column_config=col_cfg)
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
             with col1:
                 st.download_button(
                     "Baixar CSV",
@@ -1147,22 +1072,13 @@ def render():
                     use_container_width=True
                 )
             with col2:
-                xlsx_bytes_fast = to_xlsx_bytes_quick(df, "Cuenta")
-                st.download_button(
-                    "XLSX Rápido",
-                    xlsx_bytes_fast,
-                    "cuenta_rapido.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
-            with col3:
                 xlsx_bytes = to_xlsx_bytes_format(
                     df, "Cuenta",
                     numeric_cols=["Debe","Haber","Saldo Real","Saldo"],
                     date_cols=date_cols
                 )
                 st.download_button(
-                    "XLSX Formatado",
+                    "Baixar XLSX",
                     xlsx_bytes,
                     "cuenta.xlsx",
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
