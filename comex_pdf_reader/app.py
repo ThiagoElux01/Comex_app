@@ -8,6 +8,13 @@ from ui.pages import home, process_pdfs, settings_page
 from ui.pages import downloads_page
 from ui.pages import app_archivo_gastos
 
+def main():
+    st.set_page_config(page_title="COMEX PDF READER", page_icon="📄", layout="wide")
+
+    if not is_authenticated():
+        render_login()
+        return
+
     # 1) Ler a página escolhida (ANTES do header)
     page = sidebar_navigation(PAGES)
 
@@ -22,7 +29,7 @@ from ui.pages import app_archivo_gastos
 
     # 4) Renderizar o cabeçalho com o título escolhido
     app_header(title=header_title)
-    
+
     # 5) Roteamento
     if page == "Home":
         home.render()
@@ -34,6 +41,6 @@ from ui.pages import app_archivo_gastos
         settings_page.render()
     else:
         st.error("Página não encontrada.")
-        
+
 if __name__ == "__main__":
     main()
