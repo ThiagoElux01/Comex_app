@@ -499,22 +499,27 @@ def render():
         if st.button("Estado de Cuenta", use_container_width=True):
             _set_mode("estado")
             st.session_state["aag_state"]["last_action"] = "estado"
+            st.rerun()
     with col_b2:
         if st.button("Plantilla Gastos", use_container_width=True):
             _set_mode("plantilla")
             st.session_state["aag_state"]["last_action"] = "plantilla"
+            st.rerun()
     with col_b3:
         if st.button("Analise", use_container_width=True):
             _set_mode("asientos")
             st.session_state["aag_state"]["last_action"] = "asientos"
+            st.rerun()
     with col_b4:
         if st.button("Cuenta", use_container_width=True):
             _set_mode("cuenta")
             st.session_state["aag_state"]["last_action"] = "cuenta"
+            st.rerun()
     with col_b5:
         if st.button("Limpieza Plantilla Gastos", use_container_width=True):
             _set_mode("limpieza")  # <<< vira um modo persistente
             st.session_state["aag_state"]["last_action"] = "limpieza_pg"
+            st.rerun()
 
     mode = st.session_state["aag_mode"]
     st.divider()
@@ -574,7 +579,7 @@ def render():
                     try:
                         if "CTA" not in df_ec.columns or "Período" not in df_ec.columns:
                             st.error("Estado de Cuenta não contém as colunas esperadas: 'CTA' e 'Período'.")
-                            st.stop()
+                            return  
 
                         df_ec_proc = df_ec.copy()
                         df_ec_proc["CTA"] = df_ec_proc["CTA"].apply(_norm_conta)
