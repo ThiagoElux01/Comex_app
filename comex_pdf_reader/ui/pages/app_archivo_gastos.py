@@ -525,7 +525,7 @@ def render():
                         ).sort_values(by="Removidas", ascending=False)
                         st.dataframe(det, use_container_width=True, height=280)
 
-                st.caption("Prévia da Plantilla de Gastos (após limpeza):")
+                #st.caption("Prévia da Plantilla de Gastos (após limpeza):")
                 df_pg_prev = st.session_state["aag_plantilla_df"]
 
                 amount_col_view = None
@@ -550,7 +550,7 @@ def render():
                     else:
                         col_cfg[dc] = st.column_config.TextColumn()
 
-                st.dataframe(df_pg_prev, use_container_width=True, height=520, column_config=col_cfg)
+               # st.dataframe(df_pg_prev, use_container_width=True, height=520, column_config=col_cfg)
 
                 col_csv, col_xlsx = st.columns(2)
                 with col_csv:
@@ -559,20 +559,6 @@ def render():
                         df_pg_prev.to_csv(index=False).encode("utf-8"),
                         "plantilla_gastos_limpia.csv",
                         "text/csv",
-                        use_container_width=True
-                    )
-                with col_xlsx:
-                    xlsx_bytes = to_xlsx_bytes_format(
-                        df_pg_prev,
-                        sheet_name="PlantillaGastos (Limpia)",
-                        numeric_cols=[amount_col_view] if amount_col_view else [],
-                        date_cols=[c for c in df_pg_prev.columns if pd.api.types.is_datetime64_any_dtype(df_pg_prev[c]) or c in found_date_cols_view],
-                    )
-                    st.download_button(
-                        "Baixar XLSX (Plantilla Limpia)",
-                        xlsx_bytes,
-                        "plantilla_gastos_limpia.xlsx",
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
 
