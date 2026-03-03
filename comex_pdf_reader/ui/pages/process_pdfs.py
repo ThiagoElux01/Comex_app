@@ -221,6 +221,15 @@ def _select_action(action_key: str):
     st.session_state.uploader_key = f"uploader_{action_key}"
 
 # ================== HELPERS (PRN) ==================
+def _filter_rows_starting_with_zero(rows, first_col_idx: int = 0):
+    """Remove linhas cujo primeiro campo (após strip) começa com '0'."""
+    filtered = []
+    for vals in rows:
+        first = "" if first_col_idx >= len(vals) else str(vals[first_col_idx] or "").strip()
+        if not first.startswith("0"):
+            filtered.append(vals)
+    return filtered
+
 import math
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
