@@ -342,6 +342,19 @@ def gerar_externos_prn_segunda_aba(xls_file):
             continue
         rows_clean.append(vals)
 
+    rows_clean = []
+    for vals in rows_raw:
+        d_val = _to_str(vals[3])
+        if d_val.strip() in {"0", "0.0"}:
+            vals[3] = ""
+        f_val = _to_str(vals[5]).strip()
+        if f_val in {"", "0", "0.0"}:
+            continue
+        b_val = _to_str(vals[0])  # NÃO usar .strip() aqui, pois precisamos preservar espaços
+        if b_val.startswith("0     "): 
+            continue
+        rows_clean.append(vals)
+
     widths2 = PRN_WIDTHS_2[:]  # 13 colunas
     DEC2_COLS = {5}  # apenas F (0-based)
     def fmt(col_idx, value):
