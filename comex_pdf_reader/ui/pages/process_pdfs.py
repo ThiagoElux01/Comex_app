@@ -935,7 +935,7 @@ def render():
                 df_all = ajustar_sharepoint_df(df_all)
                 st.session_state["sharepoint_df"] = df_all
                 st.success("✔️ DataFrame atualizado")
-                st.dataframe(df_all, use_container_width=True, height=500)
+               # st.dataframe(df_all, use_container_width=True, height=500)
 
                 st.subheader("⬇️ Downloads do Arquivo SharePoint")
                 col_csv, col_xlsx = st.columns(2)
