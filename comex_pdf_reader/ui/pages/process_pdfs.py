@@ -334,15 +334,21 @@ def gerar_externos_prn_segunda_aba(xls_file):
 
     rows_clean = []
     for vals in rows_raw:
+        # Coluna D (0-based idx 3 → E): se "0" ou "0.0", vira vazio
         d_val = _to_str(vals[3])
         if d_val.strip() in {"0", "0.0"}:
             vals[3] = ""
-        f_val = _to_str(vals[5]).strip()
+    
+        # Coluna F (0-based idx 4): se vazio/"0"/"0.0", exclui a linha
+        f_val = _to_str(vals[4]).strip()  # <-- AJUSTADO: era [5], agora [4]
         if f_val in {"", "0", "0.0"}:
             continue
-        b_val = _to_str(vals[0])  # NÃO usar .strip() aqui, pois precisamos preservar espaços
-        if b_val.startswith("0     "): 
+    
+        # Regra específica: excluir se começar com "0" + 5 espaços (na coluna B → vals[0])
+        b_val = _to_str(vals[0])  # sem strip!
+        if b_val.startswith("0     "):  # "0" + 5 espaços
             continue
+    
         rows_clean.append(vals)
 
     widths2 = PRN_WIDTHS_2[:]  # 13 colunas
