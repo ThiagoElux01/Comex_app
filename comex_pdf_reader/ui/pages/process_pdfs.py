@@ -342,16 +342,12 @@ def gerar_externos_prn_segunda_aba(xls_file):
             continue
         rows_clean.append(vals)
 
-    # 🔧 NOVO: remove linhas cujo 1º campo começa com "0"
-    rows_clean = _filter_rows_starting_with_zero(rows_clean, first_col_idx=0)
-
     widths2 = PRN_WIDTHS_2[:]  # 13 colunas
     DEC2_COLS = {5}  # apenas F (0-based)
     def fmt(col_idx, value):
         if col_idx in DEC2_COLS:
             return _format_decimal_2_dot(value)
         return _to_str(value)
-
     prn_bytes = _df_to_prn_bytes(rows_clean, widths2, encoding="cp1252", fmt=fmt)
     return prn_bytes
 
