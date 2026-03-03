@@ -222,6 +222,16 @@ def _select_action(action_key: str):
 
 # ================== HELPERS (PRN) ==================
 import math
+
+def _filter_rows_starting_with_zero(rows, first_col_idx: int = 0):
+    """Remove linhas cujo primeiro campo (após strip) começa com '0'."""
+    filtered = []
+    for vals in rows:
+        first = "" if first_col_idx >= len(vals) else str(vals[first_col_idx] or "").strip()
+        if not first.startswith("0"):
+            filtered.append(vals)
+    return filtered
+    
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 def _to_str(x):
@@ -331,6 +341,17 @@ def gerar_externos_prn_segunda_aba(xls_file):
         if f_val in {"", "0", "0.0"}:
             continue
         rows_clean.append(vals)
+
+    widths2 = PRN_WIDTHS_2[:]  # 13 colunas
+    DEC2_COLS = {5}  # apenas F (0-based)
+    def fmt(col_idx, value):
+        if col_idx in DEC2_COLS:
+            return _format_decimal_2_dot(value)
+        return _to_str(value)
+
+    
+    # ▼ NOVO: filtra linhas cujo primeiro campo inicia com '0'
+    rows_clean = _filter_rows_starting_with_zero(rows_clean, first_col_idx=0)
 
     widths2 = PRN_WIDTHS_2[:]  # 13 colunas
     DEC2_COLS = {5}  # apenas F (0-based)
