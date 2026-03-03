@@ -317,6 +317,7 @@ def gerar_externos_prn_segunda_aba(xls_file):
             return ""
         return ""
 
+    # Detecta a linha-limite (fim dos dados válidos)
     linha_limite = 0
     for r in range(2, 46001):
         val_b = get_cell2(r, 2)
@@ -326,21 +327,31 @@ def gerar_externos_prn_segunda_aba(xls_file):
     if linha_limite <= 0:
         linha_limite = 1496
 
+    # Monta linhas brutas (13 colunas: B..N)
     rows_raw = []
     for r in range(2, max(2, linha_limite) + 1):
-        row_vals = [get_cell2(r, c) for c in range(2, 15)]  # 13 colunas
+        row_vals = [get_cell2(r, c) for c in range(2, 15)]  # 13 colunas (B..N)
         rows_raw.append(row_vals)
 
+    # Limpeza e filtros
     rows_clean = []
     for vals in rows_raw:
+        # Regras existentes
         d_val = _to_str(vals[3])
         if d_val.strip() in {"0", "0.0"}:
             vals[3] = ""
         f_val = _to_str(vals[5]).strip()
         if f_val in {"", "0", "0.0"}:
             continue
+
+        # ✅ NOVO: descartar a linha se o primeiro campo (coluna B) começar com '0'
+        first_field = _to_str(vals[0]).strip()
+        if first_field.startswith("0"):
+            continue
+
         rows_clean.append(vals)
 
+    # Formatação PRN
     widths2 = PRN_WIDTHS_2[:]  # 13 colunas
     DEC2_COLS = {5}  # apenas F (0-based)
     def fmt(col_idx, value):
@@ -350,7 +361,6 @@ def gerar_externos_prn_segunda_aba(xls_file):
 
     prn_bytes = _df_to_prn_bytes(rows_clean, widths2, encoding="cp1252", fmt=fmt)
     return prn_bytes
-
 # ------------------- ADICIONALES: 1ª ABA -> PRN -------------------
 def gerar_adicionales_prn_primeira_aba(xls_file):
     name = getattr(xls_file, "name", "").lower()
@@ -372,7 +382,13 @@ def gerar_adicionales_prn_primeira_aba(xls_file):
     for r in range(3, 1501, 4):
         val_c = _to_str(get_cell(r, 3))
         if val_c != "":
-            row_vals = [get_cell(r, c) for c in range(3, 27)]
+            row_vals = [get_cell(r, c) for c in range(3, 27)]  # 24 colunas (C..Z)
+
+            # ✅ NOVO: descartar a linha se o primeiro campo (coluna C) começar com '0'
+            first_field = _to_str(row_vals[0]).strip()
+            if first_field.startswith("0"):
+                continue
+
             rows_values.append(row_vals)
 
     DEC2_COLS = {5, 6, 9, 20, 21}
