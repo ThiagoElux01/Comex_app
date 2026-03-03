@@ -330,6 +330,11 @@ def gerar_externos_prn_segunda_aba(xls_file):
         f_val = _to_str(vals[5]).strip()
         if f_val in {"", "0", "0.0"}:
             continue
+        
+        f_val = _to_str(vals[0]).strip()
+        if f_val in {"", "0", "0.0"}:
+            continue
+            
         rows_clean.append(vals)
 
     widths2 = PRN_WIDTHS_2[:]  # 13 colunas
