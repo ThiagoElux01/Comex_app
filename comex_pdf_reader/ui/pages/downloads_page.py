@@ -15,6 +15,7 @@ def render():
     st.subheader("📦 Arquivos modelo")
     st.caption("Baixe os templates em Excel (.xlsx) para preparar os dados.")
 
+    # ===== Linha 1 =====
     col4, col1, col2, col3 = st.columns(4)
 
     with col1:
@@ -52,16 +53,18 @@ def render():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
-    
-    # 👇 Linha 2 (NOVO): adiciona o 281130 embaixo do 281110
-        r2c4, r2c1, r2c2, r2c3 = st.columns(4)
-        with r2c3:
-            st.download_button(
-                label="⬇️ Carga Adicionales 281130 (XLSX)",
-                data=_read_file_bytes("carga_adicionales_30.xlsx"),
-                file_name="carga_adicionales_30.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
+
+    # ===== Linha 2 (NOVO) =====
+    # Coloque na 3ª coluna para ficar "embaixo" do 281110
+    r2c4, r2c1, r2c2, r2c3 = st.columns(4)
+    with r2c3:
+        st.download_button(
+            label="⬇️ Carga Adicionales 281130 (XLSX)",
+            data=_read_file_bytes("carga_adicionales_30.xlsx"),
+            file_name="carga_adicionales_30.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
         )
+
     st.divider()
     st.info("Nesta página é possível baixar os arquivos modelo esperados por cada fluxo.")
