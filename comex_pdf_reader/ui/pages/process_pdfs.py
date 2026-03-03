@@ -221,15 +221,6 @@ def _select_action(action_key: str):
     st.session_state.uploader_key = f"uploader_{action_key}"
 
 # ================== HELPERS (PRN) ==================
-def _filter_rows_starting_with_zero(rows, first_col_idx: int = 0):
-    """Remove linhas cujo primeiro campo (após strip) começa com '0'."""
-    filtered = []
-    for vals in rows:
-        first = "" if first_col_idx >= len(vals) else str(vals[first_col_idx] or "").strip()
-        if not first.startswith("0"):
-            filtered.append(vals)
-    return filtered
-
 import math
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
@@ -317,7 +308,6 @@ def gerar_externos_prn_segunda_aba(xls_file):
             return ""
         return ""
 
-    # Detecta a linha-limite (fim dos dados válidos)
     linha_limite = 0
     for r in range(2, 46001):
         val_b = get_cell2(r, 2)
@@ -327,31 +317,21 @@ def gerar_externos_prn_segunda_aba(xls_file):
     if linha_limite <= 0:
         linha_limite = 1496
 
-    # Monta linhas brutas (13 colunas: B..N)
     rows_raw = []
     for r in range(2, max(2, linha_limite) + 1):
-        row_vals = [get_cell2(r, c) for c in range(2, 15)]  # 13 colunas (B..N)
+        row_vals = [get_cell2(r, c) for c in range(2, 15)]  # 13 colunas
         rows_raw.append(row_vals)
 
-    # Limpeza e filtros
     rows_clean = []
     for vals in rows_raw:
-        # Regras existentes
         d_val = _to_str(vals[3])
         if d_val.strip() in {"0", "0.0"}:
             vals[3] = ""
         f_val = _to_str(vals[5]).strip()
         if f_val in {"", "0", "0.0"}:
             continue
-
-        # ✅ NOVO: descartar a linha se o primeiro campo (coluna B) começar com '0'
-        first_field = _to_str(vals[0]).strip()
-        if first_field.startswith("0"):
-            continue
-
         rows_clean.append(vals)
 
-    # Formatação PRN
     widths2 = PRN_WIDTHS_2[:]  # 13 colunas
     DEC2_COLS = {5}  # apenas F (0-based)
     def fmt(col_idx, value):
@@ -361,6 +341,7 @@ def gerar_externos_prn_segunda_aba(xls_file):
 
     prn_bytes = _df_to_prn_bytes(rows_clean, widths2, encoding="cp1252", fmt=fmt)
     return prn_bytes
+
 # ------------------- ADICIONALES: 1ª ABA -> PRN -------------------
 def gerar_adicionales_prn_primeira_aba(xls_file):
     name = getattr(xls_file, "name", "").lower()
@@ -382,13 +363,7 @@ def gerar_adicionales_prn_primeira_aba(xls_file):
     for r in range(3, 1501, 4):
         val_c = _to_str(get_cell(r, 3))
         if val_c != "":
-            row_vals = [get_cell(r, c) for c in range(3, 27)]  # 24 colunas (C..Z)
-
-            # ✅ NOVO: descartar a linha se o primeiro campo (coluna C) começar com '0'
-            first_field = _to_str(row_vals[0]).strip()
-            if first_field.startswith("0"):
-                continue
-
+            row_vals = [get_cell(r, c) for c in range(3, 27)]
             rows_values.append(row_vals)
 
     DEC2_COLS = {5, 6, 9, 20, 21}
@@ -960,7 +935,7 @@ def render():
                 df_all = ajustar_sharepoint_df(df_all)
                 st.session_state["sharepoint_df"] = df_all
                 st.success("✔️ DataFrame atualizado")
-               # st.dataframe(df_all, use_container_width=True, height=500)
+                st.dataframe(df_all, use_container_width=True, height=500)
 
                 st.subheader("⬇️ Downloads do Arquivo SharePoint")
                 col_csv, col_xlsx = st.columns(2)
@@ -972,6 +947,25 @@ def render():
                         mime="text/csv",
                         use_container_width=True,
                         key="sharepoint_csv"
+                    )
+                with col_xlsx:
+                    buffer = BytesIO()
+                    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                        df_all.to_excel(writer, index=False, sheet_name="SharePoint")
+                        ws = writer.book["SharePoint"]
+                        if USE_PRN_WIDTHS and df_all.shape[1] in (24, 13):
+                            # só aplica PRN widths se bater com 24 ou 13; senão, autoajuste
+                            set_fixed_widths(ws, PRN_WIDTHS_1 if df_all.shape[1] == 24 else PRN_WIDTHS_2, start_col=1)
+                        else:
+                            _autofit_worksheet(ws)
+                    buffer.seek(0)
+                    st.download_button(
+                        "Baixar XLSX (SharePoint)",
+                        data=buffer,
+                        file_name="sharepoint_all.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key="sharepoint_xlsx"
                     )
             except ValueError:
                 st.error("❌ A aba 'all' não foi encontrada no arquivo Excel.")
