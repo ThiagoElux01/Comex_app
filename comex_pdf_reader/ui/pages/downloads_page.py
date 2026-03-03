@@ -15,7 +15,7 @@ def render():
     st.subheader("📦 Arquivos modelo")
     st.caption("Baixe os templates em Excel (.xlsx) para preparar os dados.")
 
-    # ===== Linha 1 =====
+    # Linha única com 4 colunas
     col4, col1, col2, col3 = st.columns(4)
 
     with col1:
@@ -36,11 +36,20 @@ def render():
             use_container_width=True,
         )
 
+    # ⬇️ Empilhados na mesma coluna (fica um abaixo do outro)
     with col3:
         st.download_button(
             label="⬇️ Carga Adicionales 281110 (XLSX)",
             data=_read_file_bytes("carga_adicionales_10.xlsx"),
             file_name="carga_adicionales_10.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+        st.write("")  # pequeno espaçador vertical
+        st.download_button(
+            label="⬇️ Carga Adicionales 281130 (XLSX)",
+            data=_read_file_bytes("carga_adicionales_30.xlsx"),
+            file_name="carga_adicionales_30.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
@@ -50,18 +59,6 @@ def render():
             label="⬇️ Comex Report (XLSX)",
             data=_read_file_bytes("comex.xlsx"),
             file_name="comex.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-
-    # ===== Linha 2 (NOVO) =====
-    # Coloque na 3ª coluna para ficar "embaixo" do 281110
-    r2c4, r2c1, r2c2, r2c3 = st.columns(4)
-    with r2c3:
-        st.download_button(
-            label="⬇️ Carga Adicionales 281130 (XLSX)",
-            data=_read_file_bytes("carga_adicionales_30.xlsx"),
-            file_name="carga_adicionales_30.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
