@@ -255,21 +255,13 @@ def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
     # 5) Merge com Tasa (vinda do Streamlit session_state)
     tasa_df = st.session_state.get("tasa_df")
     df = adicionar_tasa_sharepoint(df, tasa_df)
+
+    # Se a moeda for PEN, a Tasa_Sharepoint deve ser 1
+    if "moneda" in df.columns and "Tasa_Sharepoint" in df.columns:
+        df.loc[df["moneda"].astype(str).str.upper().str.strip() == "PEN", "Tasa_Sharepoint"] = 1
     
     # ✔ Renomeia aqui mesmo!
     if "Tasa" in df.columns:
         df = df.rename(columns={"Tasa": "Tasa_Sharepoint"})
-            # --- REGRA: Moeda PEN => Tasa_Sharepoint = 1 (independente do merge com SUNAT) ---
-        try:
-            # garante existência e trata variações de caixa/espaços
-            if "moneda" in df.columns:
-                df["moneda"] = df["moneda"].astype(str).str.upper().str.strip()
-            if "Tasa_Sharepoint" not in df.columns:
-                df["Tasa_Sharepoint"] = None
-        
-            df.loc[df["moneda"] == "PEN", "Tasa_Sharepoint"] = 1
-        except Exception:
-            # defensivo: não quebra o fluxo se algum arquivo vier fora do padrão
-            pass
     return df
 
