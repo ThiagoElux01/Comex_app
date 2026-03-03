@@ -327,7 +327,7 @@ def gerar_externos_prn_segunda_aba(xls_file):
         d_val = _to_str(vals[3])
         if d_val.strip() in {"0", "0.0"}:
             vals[3] = ""
-        f_val = _to_str(vals[0]).strip()
+        f_val = _to_str(vals[5]).strip()
         if f_val in {"", "0", "0.0"}:
             continue
         rows_clean.append(vals)
