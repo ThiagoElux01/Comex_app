@@ -942,27 +942,25 @@ def render():
                 # --- [NOVO] Sanitiza quebras de linha internas em colunas de texto ---
                 # Defina aqui se quer limpar apenas a coluna de texto da transação ou todas as colunas textuais:
                 
-                def _clean_multiline_series(s: pd.Series) -> pd.Series:
-                    # troca \r/\n por espaço, colapsa espaços repetidos e trim
-                    return (
-                        s.astype(str)
-                         .str.replace(r"[\r\n]+", " ", regex=True)
-                         .str.replace(r"\s+", " ", regex=True)
-                         .str.strip()
-                    )
-                    
-                # (A) Limpar apenas a coluna de texto da transação (recomendado):
-                # tente localizar pelos nomes mais comuns
-                _tx_candidates = ["TransactTxt", "Transact Txt", "Transaction Text", "TransactText", "Text", "Texto"]
-                for _c in df_pg.columns:
-                    if str(_c).strip().lower() in {c.lower().replace(" ", "") for c in _tx_candidates} or \
-                       any(t in str(_c).lower() for t in ["transact", "text", "texto"]):
+                def _sanitize_text_cols(df: pd.DataFrame, only_cols: list[str] | None = None) -> pd.DataFrame:
+                    """
+                    Remove quebras de linha e caracteres de controle em colunas textuais,
+                    colapsa espaços e faz strip. Se only_cols=None, aplica em todas as colunas object.
+                    """
+                    # 0x00–0x1F (controles) exceto TAB (\x09); \r e \n tratamos à parte
+                    CTRL_RE = r"[\x00-\x08\x0B-\x0C\x0E-\x1F]"
+                    cols = only_cols if only_cols else [c for c in df.columns if df[c].dtype == object]
+                    for c in cols:
                         try:
-                            df_pg[_c] = _clean_multiline_series(df_pg[_c])
+                            s = df[c].astype(str)
+                            s = s.str.replace(r"[\r\n]+", " ", regex=True)          # CR/LF -> espaço
+                            s = s.str.replace(CTRL_RE, "", regex=True)              # demais controles
+                            s = s.str.replace("\u00A0", " ", regex=False)           # NBSP -> espaço
+                            s = s.str.replace(r"\s+", " ", regex=True).str.strip()  # colapsa espaços e trim
+                            df[c] = s
                         except Exception:
-                            pass  # segue sem travar
-                        break
-                           
+                            pass
+                    return df
                 # Detecta coluna Amount (case-insensitive)
                 amount_col = None
                 for c in df_pg.columns:
