@@ -938,29 +938,7 @@ def render():
 
                 # Lê como texto para preservar zeros à esquerda (Amount e datas tratadas depois)
                 df_pg = pd.read_excel(uploaded_xl, sheet_name=0, engine=engine, dtype=str)
-                
-                # --- [NOVO] Sanitiza quebras de linha internas em colunas de texto ---
-                # Defina aqui se quer limpar apenas a coluna de texto da transação ou todas as colunas textuais:
-                
-                def _sanitize_text_cols(df: pd.DataFrame, only_cols: list[str] | None = None) -> pd.DataFrame:
-                    """
-                    Remove quebras de linha e caracteres de controle em colunas textuais,
-                    colapsa espaços e faz strip. Se only_cols=None, aplica em todas as colunas object.
-                    """
-                    # 0x00–0x1F (controles) exceto TAB (\x09); \r e \n tratamos à parte
-                    CTRL_RE = r"[\x00-\x08\x0B-\x0C\x0E-\x1F]"
-                    cols = only_cols if only_cols else [c for c in df.columns if df[c].dtype == object]
-                    for c in cols:
-                        try:
-                            s = df[c].astype(str)
-                            s = s.str.replace(r"[\r\n]+", " ", regex=True)          # CR/LF -> espaço
-                            s = s.str.replace(CTRL_RE, "", regex=True)              # demais controles
-                            s = s.str.replace("\u00A0", " ", regex=False)           # NBSP -> espaço
-                            s = s.str.replace(r"\s+", " ", regex=True).str.strip()  # colapsa espaços e trim
-                            df[c] = s
-                        except Exception:
-                            pass
-                    return df
+
                 # Detecta coluna Amount (case-insensitive)
                 amount_col = None
                 for c in df_pg.columns:
