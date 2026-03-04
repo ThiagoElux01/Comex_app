@@ -950,7 +950,15 @@ def render():
                     # Somente colunas de texto; Amount será convertido depois
                     if df_pg[col].dtype == object:
                         df_pg[col] = _remove_newlines(df_pg[col])
+
+                # --- (1) Garantir que colunas de TEXTO não fiquem com NaN ---
+                # Preenche NaN -> "" apenas em colunas de objeto/texto
+                obj_cols = [c for c in df_pg.columns if df_pg[c].dtype == object]
+                df_pg[obj_cols] = df_pg[obj_cols].fillna("")
                 
+                # (opcional) Se quiser também normalizar espaços "quebrados"
+                df_pg[obj_cols] = df_pg[obj_cols].apply(lambda s: s.str.replace(r"\s+", " ", regex=True).str.strip())
+
                 # Se quiser garantir especificamente para a coluna PPQ:
                 # (caso o nome varie, ajuste conforme seu arquivo)
                 possible_ppq_cols = [c for c in df_pg.columns if str(c).strip().lower() in {"ppq"}]
