@@ -40,7 +40,13 @@ def _set_mode(mode: str):
 
 
 # ==== Helpers de formatação para 'Chave' ====
-
+def _remove_newlines(s: pd.Series) -> pd.Series:
+    """Remove \r e \n de uma Series de strings."""
+    return (
+        s.astype(str)
+         .str.replace(r"[\r\n]+", " ", regex=True)  # troca por espaço (ou use "" se quiser colar)
+         .str.strip()
+    )
 def _fmt_date_ddmmyyyy(value) -> str:
     """Converte vários tipos de data para 'dd/mm/aaaa' como string."""
     if pd.isna(value):
@@ -939,6 +945,18 @@ def render():
                 # Lê como texto para preservar zeros à esquerda (Amount e datas tratadas depois)
                 df_pg = pd.read_excel(uploaded_xl, sheet_name=0, engine=engine, dtype=str)
 
+                # --- Sanitização: remover quebras de linha de todas as colunas texto ---
+                for col in df_pg.columns:
+                    # Somente colunas de texto; Amount será convertido depois
+                    if df_pg[col].dtype == object:
+                        df_pg[col] = _remove_newlines(df_pg[col])
+                
+                # Se quiser garantir especificamente para a coluna PPQ:
+                # (caso o nome varie, ajuste conforme seu arquivo)
+                possible_ppq_cols = [c for c in df_pg.columns if str(c).strip().lower() in {"ppq"}]
+                for c in possible_ppq_cols:
+                    df_pg[c] = _remove_newlines(df_pg[c])
+                    
                 # Detecta coluna Amount (case-insensitive)
                 amount_col = None
                 for c in df_pg.columns:
