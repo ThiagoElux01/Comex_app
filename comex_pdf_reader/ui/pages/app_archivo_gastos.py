@@ -938,7 +938,31 @@ def render():
 
                 # Lê como texto para preservar zeros à esquerda (Amount e datas tratadas depois)
                 df_pg = pd.read_excel(uploaded_xl, sheet_name=0, engine=engine, dtype=str)
-
+                
+                # --- [NOVO] Sanitiza quebras de linha internas em colunas de texto ---
+                # Defina aqui se quer limpar apenas a coluna de texto da transação ou todas as colunas textuais:
+                
+                def _clean_multiline_series(s: pd.Series) -> pd.Series:
+                    # troca \r/\n por espaço, colapsa espaços repetidos e trim
+                    return (
+                        s.astype(str)
+                         .str.replace(r"[\r\n]+", " ", regex=True)
+                         .str.replace(r"\s+", " ", regex=True)
+                         .str.strip()
+                    )
+                    
+                # (A) Limpar apenas a coluna de texto da transação (recomendado):
+                # tente localizar pelos nomes mais comuns
+                _tx_candidates = ["TransactTxt", "Transact Txt", "Transaction Text", "TransactText", "Text", "Texto"]
+                for _c in df_pg.columns:
+                    if str(_c).strip().lower() in {c.lower().replace(" ", "") for c in _tx_candidates} or \
+                       any(t in str(_c).lower() for t in ["transact", "text", "texto"]):
+                        try:
+                            df_pg[_c] = _clean_multiline_series(df_pg[_c])
+                        except Exception:
+                            pass  # segue sem travar
+                        break
+                           
                 # Detecta coluna Amount (case-insensitive)
                 amount_col = None
                 for c in df_pg.columns:
