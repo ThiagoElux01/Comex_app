@@ -88,6 +88,52 @@ USE_PRN_WIDTHS = True  # <- altere para False se quiser voltar ao autoajuste
 PRN_WIDTHS_1 = [10, 25, 6, 6, 6, 16, 16, 2, 5, 16, 3, 2, 30, 6, 3, 3, 8, 3, 6, 4, 16, 16, 3, 6]  # 24 colunas
 PRN_WIDTHS_2 = [6, 3, 3, 8, 3, 16, 16, 2, 30, 6, 15, 20, 5]  # 13 colunas
 
+def _coalesce_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Se houver colunas duplicadas (mesmo nome), consolida em uma só:
+    pega o primeiro valor não-nulo da esquerda para a direita.
+    """
+    if df is None or df.empty:
+        return df
+
+    cols = list(df.columns)
+    dups = pd.Index(cols)[pd.Index(cols).duplicated()].unique().tolist()
+    if not dups:
+        return df
+
+    df2 = df.copy()
+    for col in dups:
+        same = [c for c in df2.columns if c == col]
+        # cria uma série consolidada: primeiro não-nulo entre as duplicadas
+        consolidated = df2[same].bfill(axis=1).iloc[:, 0]
+        # remove todas e recoloca só uma
+        df2 = df2.drop(columns=same)
+        df2[col] = consolidated
+
+    return df2
+
+
+def _make_unique_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Garante nomes únicos renomeando duplicadas para: col, col__2, col__3...
+    Use isso se você NÃO quiser consolidar (somente renomear).
+    """
+    if df is None or df.empty:
+        return df
+
+    seen = {}
+    new_cols = []
+    for c in df.columns:
+        c = str(c)
+        if c not in seen:
+            seen[c] = 1
+            new_cols.append(c)
+        else:
+            seen[c] += 1
+            new_cols.append(f"{c}__{seen[c]}")
+    df2 = df.copy()
+    df2.columns = new_cols
+    return df2
 
 def set_fixed_widths(ws, widths, start_col: int = 1, add_excel_padding: bool = True):
     """
@@ -967,9 +1013,20 @@ def render():
     
                 from services.sharepoint_utils import ajustar_sharepoint_df
                 df_all = ajustar_sharepoint_df(df_all)
-    
+                
+                # ✅ Diagnóstico rápido (opcional, mas ajuda muito)
+                dup_cols = df_all.columns[df_all.columns.duplicated()].tolist()
+                if dup_cols:
+                    st.warning(f"⚠️ Colunas duplicadas detectadas: {dup_cols}")
+                
+                # ✅ Opção A (recomendada): consolidar duplicadas (melhor p/ Tasa_Sharepoint)
+                df_all = _coalesce_duplicate_columns(df_all)
+                
+                # ✅ Opção B (alternativa): apenas renomear duplicadas
+                # df_all = _make_unique_columns(df_all)
+                
                 st.session_state["sharepoint_df"] = df_all
-                st.success(f"✔️ DataFrame atualizado (aba carregada: '{sheet_all}')")
+                st.success("✔️ DataFrame atualizado")
                 st.dataframe(df_all, width="stretch", height=500)
     
                 st.subheader("⬇️ Downloads do Arquivo SharePoint")
