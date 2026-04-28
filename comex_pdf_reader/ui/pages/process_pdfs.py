@@ -8,7 +8,7 @@ from ui.pages import downloads_page
 ADICIONALES_AVAILABLE = True
 ADICIONALES_ERR = None
 try:
-    from services.adicionales_service import process_adicionales_streamlit
+    from services.adicionales_service import process_adicimonales_streamlit
 except Exception as e:
     ADICIONALES_AVAILABLE = False
     ADICIONALES_ERR = e
@@ -978,52 +978,6 @@ def render():
                 st.error("❌ Erro ao processar o arquivo Excel.")
                 st.exception(e)
 
-    with tab3:
-    st.subheader("📁 Arquivo Sharepoint")
-    st.caption("Carregue um arquivo Excel para leitura da aba 'all'.")
-
-    uploaded_excel = st.file_uploader(
-        "Carregar Arquivo",
-        type=["xlsx", "xls"],
-        key="sharepoint_excel_uploader"
-    )
-
-    if uploaded_excel:
-        try:
-            xls = pd.ExcelFile(uploaded_excel, engine="openpyxl")
-
-            # normaliza nomes das abas
-            sheet_map = {s.strip().lower(): s for s in xls.sheet_names}
-
-            if "all" not in sheet_map:
-                st.error(
-                    "❌ A aba 'all' não foi encontrada no arquivo Excel.\n\n"
-                    f"Abas disponíveis: {xls.sheet_names}"
-                )
-                st.stop()
-
-            sheet_real = sheet_map["all"]
-
-            df_all = pd.read_excel(
-                uploaded_excel,
-                sheet_name=sheet_real,
-                header=0,
-                usecols="A:Z",
-                nrows=20000,
-                engine="openpyxl"
-            )
-
-            from services.sharepoint_utils import ajustar_sharepoint_df
-            df_all = ajustar_sharepoint_df(df_all)
-
-            st.session_state["sharepoint_df"] = df_all
-
-            st.success("✔️ DataFrame atualizado")
-            st.dataframe(df_all, width="stretch", height=500)
-
-        except Exception as e:
-            st.error("❌ Erro ao processar o arquivo Excel.")
-            st.exception(e)
     with tab4:
         downloads_page.render()
 
