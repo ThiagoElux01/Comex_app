@@ -8,7 +8,7 @@ from ui.pages import downloads_page
 ADICIONALES_AVAILABLE = True
 ADICIONALES_ERR = None
 try:
-    from services.adicionales_service import process_adicionales_streamlit
+    from services.adicionales_service import process_adicimonales_streamlit
 except Exception as e:
     ADICIONALES_AVAILABLE = False
     ADICIONALES_ERR = e
@@ -88,52 +88,6 @@ USE_PRN_WIDTHS = True  # <- altere para False se quiser voltar ao autoajuste
 PRN_WIDTHS_1 = [10, 25, 6, 6, 6, 16, 16, 2, 5, 16, 3, 2, 30, 6, 3, 3, 8, 3, 6, 4, 16, 16, 3, 6]  # 24 colunas
 PRN_WIDTHS_2 = [6, 3, 3, 8, 3, 16, 16, 2, 30, 6, 15, 20, 5]  # 13 colunas
 
-def _coalesce_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Se houver colunas duplicadas (mesmo nome), consolida em uma só:
-    pega o primeiro valor não-nulo da esquerda para a direita.
-    """
-    if df is None or df.empty:
-        return df
-
-    cols = list(df.columns)
-    dups = pd.Index(cols)[pd.Index(cols).duplicated()].unique().tolist()
-    if not dups:
-        return df
-
-    df2 = df.copy()
-    for col in dups:
-        same = [c for c in df2.columns if c == col]
-        # cria uma série consolidada: primeiro não-nulo entre as duplicadas
-        consolidated = df2[same].bfill(axis=1).iloc[:, 0]
-        # remove todas e recoloca só uma
-        df2 = df2.drop(columns=same)
-        df2[col] = consolidated
-
-    return df2
-
-
-def _make_unique_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Garante nomes únicos renomeando duplicadas para: col, col__2, col__3...
-    Use isso se você NÃO quiser consolidar (somente renomear).
-    """
-    if df is None or df.empty:
-        return df
-
-    seen = {}
-    new_cols = []
-    for c in df.columns:
-        c = str(c)
-        if c not in seen:
-            seen[c] = 1
-            new_cols.append(c)
-        else:
-            seen[c] += 1
-            new_cols.append(f"{c}__{seen[c]}")
-    df2 = df.copy()
-    df2.columns = new_cols
-    return df2
 
 def set_fixed_widths(ws, widths, start_col: int = 1, add_excel_padding: bool = True):
     """
@@ -968,70 +922,28 @@ def render():
     # -------------------------
     # 📁 Arquivo Sharepoint
     # -------------------------
-    from io import BytesIO
-    import pandas as pd
-    
     with tab3:
         st.subheader("📁 Arquivo Sharepoint")
         st.caption("Carregue um arquivo Excel para leitura da aba 'all'.")
-    
-        uploaded_excel = st.file_uploader(
-            "Carregar Arquivo",
-            type=["xlsx", "xls"],
-            key="sharepoint_excel_uploader"
-        )
-    
+        uploaded_excel = st.file_uploader("Carregar Arquivo", type=["xlsx", "xls"], key="sharepoint_excel_uploader")
         if uploaded_excel:
             try:
-                # ✅ 1) Congela o arquivo em bytes (evita problemas de ponteiro em rerun)
-                file_bytes = uploaded_excel.getvalue()
-    
-                name = (getattr(uploaded_excel, "name", "") or "").lower()
-                engine = "xlrd" if name.endswith(".xls") else "openpyxl"
-    
-                # ✅ 2) Diagnóstico: quais abas existem de verdade
-                xls = pd.ExcelFile(BytesIO(file_bytes), engine=engine)
-                sheets = xls.sheet_names
-    
-                # ✅ 3) Encontra a aba 'all' de forma segura (ou falha mostrando as existentes)
-                sheet_all = next((s for s in sheets if str(s).strip().lower() == "all"), None)
-                if sheet_all is None:
-                    st.error("❌ A aba 'all' não foi encontrada no arquivo Excel.")
-                    st.info("📄 Abas disponíveis no arquivo:")
-                    st.code("\n".join(map(str, sheets)))
-                    st.stop()
-    
-                # ✅ 4) Lê de um BytesIO novo (sempre no início)
                 df_all = pd.read_excel(
-                    BytesIO(file_bytes),
-                    sheet_name=sheet_all,
+                    uploaded_excel,
+                    sheet_name="all",
                     header=0,
                     usecols="A:Z",
                     nrows=20000,
-                    engine=engine
+                    engine="openpyxl"
                 )
-    
                 from services.sharepoint_utils import ajustar_sharepoint_df
                 df_all = ajustar_sharepoint_df(df_all)
-                
-                # ✅ Diagnóstico rápido (opcional, mas ajuda muito)
-                dup_cols = df_all.columns[df_all.columns.duplicated()].tolist()
-                if dup_cols:
-                    st.warning(f"⚠️ Colunas duplicadas detectadas: {dup_cols}")
-                
-                # ✅ Opção A (recomendada): consolidar duplicadas (melhor p/ Tasa_Sharepoint)
-                df_all = _coalesce_duplicate_columns(df_all)
-                
-                # ✅ Opção B (alternativa): apenas renomear duplicadas
-                # df_all = _make_unique_columns(df_all)
-                
                 st.session_state["sharepoint_df"] = df_all
                 st.success("✔️ DataFrame atualizado")
                 st.dataframe(df_all, width="stretch", height=500)
-    
+
                 st.subheader("⬇️ Downloads do Arquivo SharePoint")
                 col_csv, col_xlsx = st.columns(2)
-    
                 with col_csv:
                     st.download_button(
                         "Baixar CSV (SharePoint)",
@@ -1041,37 +953,31 @@ def render():
                         width="stretch",
                         key="sharepoint_csv"
                     )
-    
                 with col_xlsx:
                     buffer = BytesIO()
                     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
                         df_all.to_excel(writer, index=False, sheet_name="SharePoint")
                         ws = writer.book["SharePoint"]
-    
                         if USE_PRN_WIDTHS and df_all.shape[1] in (24, 13):
-                            set_fixed_widths(
-                                ws,
-                                PRN_WIDTHS_1 if df_all.shape[1] == 24 else PRN_WIDTHS_2,
-                                start_col=1
-                            )
+                            # só aplica PRN widths se bater com 24 ou 13; senão, autoajuste
+                            set_fixed_widths(ws, PRN_WIDTHS_1 if df_all.shape[1] == 24 else PRN_WIDTHS_2, start_col=1)
                         else:
                             _autofit_worksheet(ws)
-    
-                        header_paint(ws)
-    
                     buffer.seek(0)
                     st.download_button(
                         "Baixar XLSX (SharePoint)",
-                        data=buffer.getvalue(),
+                        data=buffer,
                         file_name="sharepoint_all.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         width="stretch",
                         key="sharepoint_xlsx"
                     )
-    
+            except ValueError:
+                st.error("❌ A aba 'all' não foi encontrada no arquivo Excel.")
             except Exception as e:
                 st.error("❌ Erro ao processar o arquivo Excel.")
                 st.exception(e)
+
     with tab4:
         downloads_page.render()
 
