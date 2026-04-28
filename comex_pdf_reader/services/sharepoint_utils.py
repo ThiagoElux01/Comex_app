@@ -1,31 +1,37 @@
-
 import pandas as pd
 import re
 from datetime import datetime
 import streamlit as st
 
+# ============================================================
+# ADICIONAR TASA SHAREPOINT (MERGE COM TASA SUNAT)
+# ============================================================
 
-def adicionar_tasa_sharepoint(df, tasa_df):
+def adicionar_tasa_sharepoint(df: pd.DataFrame, tasa_df: pd.DataFrame | None) -> pd.DataFrame:
     """
     Adiciona a coluna Tasa_Sharepoint ao DataFrame SharePoint,
     fazendo merge seguro baseado apenas na data (ignorando hora/timezone).
+    Retorna SEMPRE Tasa_Sharepoint como STRING.
     """
+    df = df.copy()
 
-    # Caso não exista Tasa carregada no session_state
-    if tasa_df is None or tasa_df.empty:
+    # Garante coluna
+    if "Tasa_Sharepoint" not in df.columns:
         df["Tasa_Sharepoint"] = ""
-        return df
 
-    df_tmp = df.copy()
+    # Se não houver Tasa SUNAT carregada, retorna como está
+    if tasa_df is None or tasa_df.empty:
+        df["Tasa_Sharepoint"] = df["Tasa_Sharepoint"].astype("string")
+        return df
 
     # ------------------------------------------------------------
     # 1) Converter Fecha_Emision para datetime (robusto)
     # ------------------------------------------------------------
-    df_tmp["Fecha_Emision_tmp"] = pd.to_datetime(
-        df_tmp["Fecha_Emision"],
-        dayfirst=True,          # permite dd/mm/yyyy, d/m/yyyy, dd-mm-yyyy
+    df["Fecha_Emision_tmp"] = pd.to_datetime(
+        df["Fecha_Emision"],
+        dayfirst=True,
         errors="coerce"
-    ).dt.normalize()            # tira hora, timezone, etc.
+    ).dt.normalize()
 
     # ------------------------------------------------------------
     # 2) Preparar Tasa SUNAT
@@ -40,7 +46,7 @@ def adicionar_tasa_sharepoint(df, tasa_df):
     # ------------------------------------------------------------
     # 3) Merge seguro
     # ------------------------------------------------------------
-    df_tmp = df_tmp.merge(
+    df = df.merge(
         tasa[["Data", "Venta"]],
         left_on="Fecha_Emision_tmp",
         right_on="Data",
@@ -48,47 +54,38 @@ def adicionar_tasa_sharepoint(df, tasa_df):
     )
 
     # ------------------------------------------------------------
-    # 4) Renomear coluna corretamente
+    # 4) Renomear e limpar
     # ------------------------------------------------------------
-    df_tmp.rename(columns={"Venta": "Tasa_Sharepoint"}, inplace=True)
+    df.rename(columns={"Venta": "Tasa_Sharepoint"}, inplace=True)
+    df.drop(columns=["Fecha_Emision_tmp", "Data"], inplace=True, errors="ignore")
 
     # ------------------------------------------------------------
-    # 5) Limpar colunas auxiliares
+    # 5) FORÇAR string (crítico p/ pandas + pyarrow)
     # ------------------------------------------------------------
-    df_tmp = df_tmp.drop(columns=["Fecha_Emision_tmp", "Data"], errors="ignore")
+    df["Tasa_Sharepoint"] = df["Tasa_Sharepoint"].astype("string")
 
-    # ------------------------------------------------------------
-    # 6) Converter Tasa para número
-    # ------------------------------------------------------------
-    df_tmp["Tasa_Sharepoint"] = pd.to_numeric(df_tmp["Tasa_Sharepoint"], errors="coerce")
+    return df
 
-    return df_tmp
 
 # ============================================================
 # FUNÇÃO UNIVERSAL PARA CORRIGIR DATAS DO SHAREPOINT
 # ============================================================
-def corrigir_data_sharepoint(valor):
+
+def corrigir_data_sharepoint(valor) -> str:
     """
     Converte datas de qualquer formato irregular do SharePoint para dd/mm/yyyy.
-    Caso não seja possível converter, retorna ''.
+    Caso não seja possível converter, retorna "".
     """
-
     if valor is None:
         return ""
 
     s = str(valor).strip()
+    s = s.replace("\u200b", "").replace("\u00a0", " ").strip()
 
-    # Remover caracteres invisíveis
-    s = s.replace("\u200b", "")      # zero-width space
-    s = s.replace("\u00a0", " ")     # no-break space
-
-    s = s.strip()
     if s == "":
         return ""
 
-    # ---------------------------
-    # 1) Extrair trecho que pareça data
-    # ---------------------------
+    # Extrair possível trecho de data
     padrao = re.compile(
         r'(\d{1,4}[-/]\d{1,2}[-/]\d{1,4})'
         r'|(\d{1,2}\s+[A-Za-zÁÉÍÓÚáéíóúñÑçÇâêôãõ]{3,15}\s+\d{2,4})'
@@ -97,9 +94,6 @@ def corrigir_data_sharepoint(valor):
     if m:
         s = m.group(0)
 
-    # ---------------------------
-    # 2) Formatos diretos
-    # ---------------------------
     formatos = [
         "%d/%m/%Y", "%d-%m-%Y",
         "%Y/%m/%d", "%Y-%m-%d",
@@ -111,41 +105,23 @@ def corrigir_data_sharepoint(valor):
 
     for fmt in formatos:
         try:
-            dt = datetime.strptime(s, fmt)
-            return dt.strftime("%d/%m/%Y")
+            return datetime.strptime(s, fmt).strftime("%d/%m/%Y")
         except:
             pass
 
-    # ---------------------------
-    # 3) Tentativa com meses PT/ES convertidos para inglês
-    # ---------------------------
     meses = {
-        # PT
         "jan": "Jan", "janeiro": "Jan",
-        "mar": "mar", "março": "Mar",
+        "fev": "Feb", "febrero": "Feb",
+        "mar": "Mar", "março": "Mar",
         "abr": "Apr", "abril": "Apr",
         "mai": "May", "maio": "May",
         "jun": "Jun", "junho": "Jun",
         "jul": "Jul", "julho": "Jul",
         "ago": "Aug", "agosto": "Aug",
-        "set": "Sep", "setembro": "Sep",
-        "out": "Oct", "outubro": "Oct",
-        "nov": "Nov", "novembro": "Nov",
-        "dez": "Dec", "dezembro": "Dec",
-
-        # ES
-        "ene": "Jan", "enero": "Jan",
-        "feb": "Feb", "febrero": "Feb",
-        "mar": "Mar", "marzo": "Mar",
-        "abr": "Apr", "abril": "Apr",
-        "may": "May", "mayo": "May",
-        "jun": "Jun", "junio": "Jun",
-        "jul": "Jul", "julio": "Jul",
-        "ago": "Aug", "agosto": "Aug",
-        "sep": "Sep", "sept": "Sep", "septiembre": "Sep",
-        "oct": "Oct", "octubre": "Oct",
+        "set": "Sep", "septiembre": "Sep",
+        "out": "Oct", "octubre": "Oct",
         "nov": "Nov", "noviembre": "Nov",
-        "dic": "Dec", "diciembre": "Dec",
+        "dez": "Dec", "diciembre": "Dec",
     }
 
     s_proc = s.lower()
@@ -156,45 +132,42 @@ def corrigir_data_sharepoint(valor):
 
     for fmt in ["%d %b %Y", "%d %B %Y", "%d-%b-%Y", "%d-%B-%Y"]:
         try:
-            dt = datetime.strptime(s_proc, fmt)
-            return dt.strftime("%d/%m/%Y")
+            return datetime.strptime(s_proc, fmt).strftime("%d/%m/%Y")
         except:
             pass
 
-    # ---------------------------
-    # 4) Não converteu → return ""
-    # ---------------------------
     return ""
 
 
 # ============================================================
-# AJUSTAR SHAREPOINT DF
+# AJUSTAR SHAREPOINT DF (FUNÇÃO PRINCIPAL)
 # ============================================================
 
-    def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
-        # --- GARANTIA DE TIPO DA TASA_SHAREPOINT ---
-    if "Tasa_Sharepoint" not in df.columns:
-        df["Tasa_Sharepoint"] = ""
-    
-    # força SEMPRE string (independente do que veio do Excel ou merge)
-    df["Tasa_Sharepoint"] = df["Tasa_Sharepoint"].astype("string")
-
+def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    # ============================================================
-    # 1) Normalizar nomes de colunas
-    # ============================================================
+    # ------------------------------------------------------------
+    # 0) Garantir Tasa_Sharepoint como STRING desde o início
+    # ------------------------------------------------------------
+    if "Tasa_Sharepoint" not in df.columns:
+        df["Tasa_Sharepoint"] = ""
+    df["Tasa_Sharepoint"] = df["Tasa_Sharepoint"].astype("string")
+
+    # ------------------------------------------------------------
+    # 1) Normalizar nomes das colunas
+    # ------------------------------------------------------------
     df.columns = (
         df.columns
+        .astype(str)
         .str.strip()
         .str.replace(" ", "_")
         .str.replace("-", "_")
         .str.lower()
     )
 
-    # ============================================================
+    # ------------------------------------------------------------
     # 2) IMPORTES NUMÉRICOS
-    # ============================================================
+    # ------------------------------------------------------------
     possiveis_nomes_importe = [
         "importe_documento",
         "importe_del_documento",
@@ -206,7 +179,6 @@ def corrigir_data_sharepoint(valor):
             return None
         s = str(value).strip()
         s = re.sub(r"[^\d,.-]", "", s)
-
         if "." in s and "," in s:
             s = s.replace(".", "").replace(",", ".")
         elif "," in s:
@@ -220,9 +192,9 @@ def corrigir_data_sharepoint(valor):
         if col in df.columns:
             df[col] = df[col].apply(clean_number)
 
-    # ============================================================
-    # 3) UNIFICAR COLUNA DE DATA → Fecha_Emision
-    # ============================================================
+    # ------------------------------------------------------------
+    # 3) DATA → Fecha_Emision
+    # ------------------------------------------------------------
     colunas_data_possiveis = [
         "fecha_de_emisipn_del_documento",
         "fecha_de_emision_del_documento",
@@ -230,7 +202,7 @@ def corrigir_data_sharepoint(valor):
         "fecha",
         "fech_emision",
         "fechadeemision",
-        "emision"
+        "emision",
     ]
 
     col_data_original = None
@@ -244,9 +216,9 @@ def corrigir_data_sharepoint(valor):
     else:
         df["Fecha_Emision"] = ""
 
-    # ============================================================
+    # ------------------------------------------------------------
     # 4) PROVEEDOR → texto antes do "-"
-    # ============================================================
+    # ------------------------------------------------------------
     if "proveedor" in df.columns:
         df["proveedor"] = (
             df["proveedor"]
@@ -256,20 +228,20 @@ def corrigir_data_sharepoint(valor):
             .str.strip()
         )
 
-    # ============================================================
-    # 5) ADICIONAR TASA USANDO A COLUNA Fecha_Emision
-    # ============================================================
-
-    # 5) Merge com Tasa (vinda do Streamlit session_state)
+    # ------------------------------------------------------------
+    # 5) MERGE COM TASA SUNAT
+    # ------------------------------------------------------------
     tasa_df = st.session_state.get("tasa_df")
     df = adicionar_tasa_sharepoint(df, tasa_df)
 
-    # Se a moeda for PEN, a Tasa_Sharepoint deve ser 1
-    if "moneda" in df.columns and "Tasa_Sharepoint" in df.columns:
-        df.loc[df["moneda"].astype(str).str.upper().str.strip() == "PEN", "Tasa_Sharepoint"] = "1"
-    
-    # ✔ Renomeia aqui mesmo!
-    if "Tasa" in df.columns:
-        df = df.rename(columns={"Tasa": "Tasa_Sharepoint"})
-    return df
+    # ------------------------------------------------------------
+    # 6) REGRA DE NEGÓCIO → PEN = 1
+    # ------------------------------------------------------------
+    if "moneda" in df.columns:
+        df["Tasa_Sharepoint"] = df["Tasa_Sharepoint"].astype("string")
+        df.loc[
+            df["moneda"].astype(str).str.upper().str.strip() == "PEN",
+            "Tasa_Sharepoint"
+        ] = "1"
 
+    return df
