@@ -5,14 +5,11 @@ from auth import is_authenticated
 from ui.login import render_login
 from ui.layout import app_header, sidebar_navigation
 from settings import PAGES, APP_NAME
-
-from ui.pages import (
-    home,
-    process_pdfs,
-    settings_page,
-    downloads_page,
-    app_archivo_gastos,
-)
+from ui.pages import home
+from ui.pages import process_pdfs
+from ui.pages import settings_page
+from ui.pages import downloads_page
+from ui.pages import app_archivo_gastos
 
 
 def main():
