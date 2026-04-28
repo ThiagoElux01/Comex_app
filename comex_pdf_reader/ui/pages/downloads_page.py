@@ -24,7 +24,7 @@ def render():
             data=_read_file_bytes("carga_duas.xlsx"),
             file_name="carga_duas.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
+            width="stretch",
         )
 
     with col2:
@@ -33,7 +33,7 @@ def render():
             data=_read_file_bytes("carga_externos.xlsx"),
             file_name="carga_externos.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
+            width="stretch",
         )
 
     # ⬇️ Empilhados na mesma coluna (fica um abaixo do outro)
@@ -43,7 +43,7 @@ def render():
             data=_read_file_bytes("carga_adicionales_10.xlsx"),
             file_name="carga_adicionales_10.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
+            width="stretch",
         )
         st.write("")  # pequeno espaçador vertical
         st.download_button(
@@ -51,7 +51,7 @@ def render():
             data=_read_file_bytes("carga_adicionales_30.xlsx"),
             file_name="carga_adicionales_30.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
+            width="stretch",
         )
 
     with col4:
@@ -60,7 +60,7 @@ def render():
             data=_read_file_bytes("comex.xlsx"),
             file_name="comex.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
+            width="stretch",
         )
 
     st.divider()
