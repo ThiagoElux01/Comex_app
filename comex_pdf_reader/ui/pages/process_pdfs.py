@@ -922,50 +922,50 @@ def render():
     # -------------------------
     # 📁 Arquivo Sharepoint
     # -------------------------
-    with tab3:
-        st.subheader("📁 Arquivo Sharepoint")
-        st.caption("Carregue um arquivo Excel para leitura da aba 'all'.")
-    
-        uploaded_excel = st.file_uploader(
-            "Carregar Arquivo",
-            type=["xlsx", "xls"],
-            key="sharepoint_excel_uploader"
-        )
-    
-        if uploaded_excel:
-            # ✅ congela o arquivo em memória (evita problemas após Tasa / rerun)
-            if "sharepoint_excel_bytes" not in st.session_state:
-                st.session_state.sharepoint_excel_bytes = uploaded_excel.getvalue()
-    
-        if "sharepoint_excel_bytes" in st.session_state:
-            try:
-                excel_bytes = BytesIO(st.session_state.sharepoint_excel_bytes)
-    
-                xls = pd.ExcelFile(excel_bytes, engine="openpyxl")
-    
-                if "all" not in xls.sheet_names:
-                    st.error(f"❌ A aba 'all' não foi encontrada. Abas disponíveis: {xls.sheet_names}")
-                    return
-    
-                df_all = pd.read_excel(
-                    xls,
-                    sheet_name="all",
-                    header=0,
-                    usecols="A:Z",
-                    nrows=20000
-                )
-    
-                from services.sharepoint_utils import ajustar_sharepoint_df
-                df_all = ajustar_sharepoint_df(df_all)
-    
-                st.session_state["sharepoint_df"] = df_all
-    
-                st.success("✔️ DataFrame atualizado")
-                st.dataframe(df_all, use_container_width=True, height=500)
-    
-            except Exception as e:
-                st.error("❌ Erro ao processar o arquivo Excel.")
-                st.exception(e)
+        with tab3:
+            st.subheader("📁 Arquivo Sharepoint")
+            st.caption("Carregue um arquivo Excel para leitura da aba 'all'.")
+        
+            uploaded_excel = st.file_uploader(
+                "Carregar Arquivo",
+                type=["xlsx", "xls"],
+                key="sharepoint_excel_uploader"
+            )
+        
+            if uploaded_excel:
+                # ✅ congela o arquivo em memória (evita problemas após Tasa / rerun)
+                if "sharepoint_excel_bytes" not in st.session_state:
+                    st.session_state.sharepoint_excel_bytes = uploaded_excel.getvalue()
+        
+            if "sharepoint_excel_bytes" in st.session_state:
+                try:
+                    excel_bytes = BytesIO(st.session_state.sharepoint_excel_bytes)
+        
+                    xls = pd.ExcelFile(excel_bytes, engine="openpyxl")
+        
+                    if "all" not in xls.sheet_names:
+                        st.error(f"❌ A aba 'all' não foi encontrada. Abas disponíveis: {xls.sheet_names}")
+                        return
+        
+                    df_all = pd.read_excel(
+                        xls,
+                        sheet_name="all",
+                        header=0,
+                        usecols="A:Z",
+                        nrows=20000
+                    )
+        
+                    from services.sharepoint_utils import ajustar_sharepoint_df
+                    df_all = ajustar_sharepoint_df(df_all)
+        
+                    st.session_state["sharepoint_df"] = df_all
+        
+                    st.success("✔️ DataFrame atualizado")
+                    st.dataframe(df_all, use_container_width=True, height=500)
+        
+                except Exception as e:
+                    st.error("❌ Erro ao processar o arquivo Excel.")
+                    st.exception(e)
 
     with tab4:
         downloads_page.render()
