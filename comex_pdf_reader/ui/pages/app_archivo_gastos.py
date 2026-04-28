@@ -496,27 +496,27 @@ def render():
     col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns(5)
 
     with col_b1:
-        if st.button("Estado de Cuenta", use_container_width=True):
+        if st.button("Estado de Cuenta", width="stretch"):
             _set_mode("estado")
             st.session_state["aag_state"]["last_action"] = "estado"
             st.rerun()
     with col_b2:
-        if st.button("Plantilla Gastos", use_container_width=True):
+        if st.button("Plantilla Gastos", width="stretch"):
             _set_mode("plantilla")
             st.session_state["aag_state"]["last_action"] = "plantilla"
             st.rerun()
     with col_b3:
-        if st.button("Analise", use_container_width=True):
+        if st.button("Analise", width="stretch"):
             _set_mode("asientos")
             st.session_state["aag_state"]["last_action"] = "asientos"
             st.rerun()
     with col_b4:
-        if st.button("Cuenta", use_container_width=True):
+        if st.button("Cuenta", width="stretch"):
             _set_mode("cuenta")
             st.session_state["aag_state"]["last_action"] = "cuenta"
             st.rerun()
     with col_b5:
-        if st.button("Limpieza Plantilla Gastos", use_container_width=True):
+        if st.button("Limpieza Plantilla Gastos", width="stretch"):
             _set_mode("limpieza")  # <<< vira um modo persistente
             st.session_state["aag_state"]["last_action"] = "limpieza_pg"
             st.rerun()
@@ -704,7 +704,7 @@ def render():
                     # Exibição
                     st.dataframe(
                         df_show,
-                        use_container_width=True, height=520,
+                        width="stretch", height=520,
                         column_config={
                             "Saldo_Estado_Cuenta": st.column_config.NumberColumn(format="%.2f"),
                             "Saldo_Plantilla_Gastos": st.column_config.NumberColumn(format="%.2f"),
@@ -721,7 +721,7 @@ def render():
                             data=df_show.to_csv(index=False).encode("utf-8"),
                             file_name="analise_pos_limpieza.csv",
                             mime="text/csv",
-                            use_container_width=True,
+                            width="stretch",
                         )
                     with col_d2:
                         xlsx_bytes_cmp = to_xlsx_bytes_format(
@@ -735,7 +735,7 @@ def render():
                             data=xlsx_bytes_cmp,
                             file_name="analise_pos_limpieza.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True,
+                            width="stretch",
                         )
 
                 # Prévia da Plantilla de Gastos (após limpeza) — SOMENTE nesta aba
@@ -763,7 +763,7 @@ def render():
                     else:
                         col_cfg[dc] = st.column_config.TextColumn()
 
-                # st.dataframe(df_pg_prev, use_container_width=True, height=520, column_config=col_cfg)
+                # st.dataframe(df_pg_prev, width="stretch", height=520, column_config=col_cfg)
 
                 col_csv, col_xlsx = st.columns(2)
                 with col_csv:
@@ -772,7 +772,7 @@ def render():
                         df_pg_prev.to_csv(index=False).encode("utf-8"),
                         "plantilla_gastos_limpia.csv",
                         "text/csv",
-                        use_container_width=True
+                        width="stretch"
                     )
 
         except Exception as e:
@@ -798,9 +798,9 @@ def render():
 
         col_run, col_clear = st.columns([2, 1])
         with col_run:
-            run_clicked = st.button("▶️ Executar", type="primary", use_container_width=True, disabled=(uploaded is None))
+            run_clicked = st.button("▶️ Executar", type="primary", width="stretch", disabled=(uploaded is None))
         with col_clear:
-            clear_clicked = st.button("Limpar", use_container_width=True)
+            clear_clicked = st.button("Limpar", width="stretch")
 
         if clear_clicked:
             st.session_state["aag_state"]["uploader_key_estado"] = upl_key_estado + "_x"
@@ -876,7 +876,7 @@ def render():
         
             st.dataframe(
                 df,
-                use_container_width=True,
+                width="stretch",
                 height=550,
                 column_config={c: st.column_config.NumberColumn(format="%.2f") for c in numeric_cols if c in df.columns},
             )
@@ -888,7 +888,7 @@ def render():
                     data=df.to_csv(index=False).encode("utf-8"),
                     file_name="estado_de_cuenta.csv",
                     mime="text/csv",
-                    use_container_width=True,
+                    width="stretch",
                 )
             with col_xlsx:
                 xlsx_bytes = to_xlsx_bytes_format(
@@ -899,7 +899,7 @@ def render():
                     data=xlsx_bytes,
                     file_name="estado_de_cuenta.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
+                    width="stretch",
                 )
 
     # -------------------------------------------------------------------------
@@ -919,9 +919,9 @@ def render():
 
         col_run, col_clear = st.columns([2, 1])
         with col_run:
-            run_clicked = st.button("▶️ Executar", type="primary", use_container_width=True, disabled=(uploaded_xl is None))
+            run_clicked = st.button("▶️ Executar", type="primary", width="stretch", disabled=(uploaded_xl is None))
         with col_clear:
-            clear_clicked = st.button("Limpar", use_container_width=True)
+            clear_clicked = st.button("Limpar", width="stretch")
 
         if clear_clicked:
             st.session_state["aag_state"]["uploader_key_pg"] = upl_key_pg + "_x"
@@ -1044,7 +1044,7 @@ def render():
                 else:
                     col_cfg[dc] = st.column_config.TextColumn()
 
-            # st.dataframe(df_pg, use_container_width=True, height=550, column_config=col_cfg)
+            # st.dataframe(df_pg, width="stretch", height=550, column_config=col_cfg)
 
             col_csv, col_xlsx = st.columns(2)
             with col_csv:
@@ -1053,7 +1053,7 @@ def render():
                     data=df_pg.to_csv(index=False).encode("utf-8"),
                     file_name="plantilla_gastos.csv",
                     mime="text/csv",
-                    use_container_width=True,
+                    width="stretch",
                 )
 
             if "aag_plantilla_df_clean" in st.session_state:
@@ -1191,7 +1191,7 @@ def render():
 
             st.dataframe(
                 df_show,
-                use_container_width=True, height=520,
+                width="stretch", height=520,
                 column_config={
                     "Saldo_Estado_Cuenta": st.column_config.NumberColumn(format="%.2f"),
                     "Saldo_Plantilla_Gastos": st.column_config.NumberColumn(format="%.2f"),
@@ -1208,7 +1208,7 @@ def render():
                     data=df_show.to_csv(index=False).encode("utf-8"),
                     file_name="analise_contas.csv",
                     mime="text/csv",
-                    use_container_width=True,
+                    width="stretch",
                 )
             with col_d2:
                 xlsx_bytes = to_xlsx_bytes_format(
@@ -1222,7 +1222,7 @@ def render():
                     data=xlsx_bytes,
                     file_name="analise_contas.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
+                    width="stretch",
                 )
 
             pbar.progress(100, text="Concluído.")
@@ -1242,9 +1242,9 @@ def render():
 
         col_r, col_c = st.columns([2, 1])
         with col_r:
-            run_clicked = st.button("▶️ Processar Cuenta", type="primary", use_container_width=True, disabled=(uploaded is None))
+            run_clicked = st.button("▶️ Processar Cuenta", type="primary", width="stretch", disabled=(uploaded is None))
         with col_c:
-            clear_clicked = st.button("Limpar", use_container_width=True)
+            clear_clicked = st.button("Limpar", width="stretch")
 
         if clear_clicked:
             st.session_state["aag_state"]["uploader_key_cuenta"] = upl_key + "_x"
@@ -1316,7 +1316,7 @@ def render():
             for dc in date_cols:
                 col_cfg[dc] = st.column_config.DateColumn(format="DD/MM/YYYY")
 
-            st.dataframe(df, use_container_width=True, height=600, column_config=col_cfg)
+            st.dataframe(df, width="stretch", height=600, column_config=col_cfg)
 
             col1, col2 = st.columns(2)
             with col1:
@@ -1325,7 +1325,7 @@ def render():
                     df.to_csv(index=False).encode("utf-8"),
                     "cuenta.csv",
                     "text/csv",
-                    use_container_width=True
+                    width="stretch"
                 )
             with col2:
                 xlsx_bytes = to_xlsx_bytes_format(
@@ -1338,7 +1338,7 @@ def render():
                     xlsx_bytes,
                     "cuenta.xlsx",
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
+                    width="stretch"
                 )
 
     else:
