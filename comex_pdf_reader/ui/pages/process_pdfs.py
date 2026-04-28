@@ -67,11 +67,16 @@ def _autofit_worksheet(ws):
         ws.column_dimensions[col[0].column_letter].width = min(max_len * 1.2, 60)
 
 def header_paint(ws):
-    fill = PatternFill("solid", fgColor="FF0077B6")
-    font = Font(color="FFFFFFFF", bold=True)
+    BLUE = "FF0077B6"
+    WHITE = "FFFFFFFF"
+    fill_blue = PatternFill(fill_type="solid", start_color=BLUE, end_color=BLUE)
+    font_white_bold = Font(color=WHITE, bold=True)
+
+    # aplica apenas na linha de cabeçalho
     for cell in ws[1]:
-        cell.fill = fill
-        cell.font = font
+        cell.fill = fill_blue
+        cell.font = font_white_bold
+
 
 def to_xlsx_bytes(df, sheet_name):
     buffer = BytesIO()
