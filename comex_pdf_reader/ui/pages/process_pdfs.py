@@ -1,5 +1,3 @@
-me de o cod todo
-
 # ui/pages/process_pdfs.py
 import streamlit as st
 from services import pdf_service
