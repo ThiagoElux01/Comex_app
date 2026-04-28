@@ -80,6 +80,20 @@ import pandas as pd
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Font
 
+def make_arrow_safe(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Garante que o DataFrame possa ser exibido no st.dataframe:
+    - Colunas object com mistura → string
+    """
+    df = df.copy()
+
+    for col in df.columns:
+        if df[col].dtype == "object":
+            # força string para evitar conflitos no Arrow
+            df[col] = df[col].astype("string")
+
+    return df
+
 # ============================
 # CONFIG: Espelhar larguras PRN nos XLSX
 # ============================
@@ -726,6 +740,7 @@ def render():
                         )
                     if df_final is not None and not df_final.empty:
                         st.success("Fluxo DUAS concluído!")
+                        df_final = make_arrow_safe(df_final)
                         st.dataframe(df_final.head(50), width="stretch")
                         col_csv, col_xlsx = st.columns(2)
                         with col_csv:
@@ -767,6 +782,7 @@ def render():
                         )
                     if df_final is not None and not df_final.empty:
                         st.success("Percepciones concluído!")
+                        df_final = make_arrow_safe(df_final)
                         st.dataframe(df_final.head(50), width="stretch")
                         col_csv, col_xlsx = st.columns(2)
                         with col_csv:
@@ -810,6 +826,7 @@ def render():
                         )
                     if df_final is not None and not df_final.empty:
                         st.success("Externos concluído!")
+                        df_final = make_arrow_safe(df_final)
                         st.dataframe(df_final.head(50), width="stretch")
                         col_csv, col_xlsx = st.columns(2)
                         with col_csv:
@@ -852,6 +869,7 @@ def render():
                         )
                     if df_final is not None and not df_final.empty:
                         st.success("Gastos Adicionales concluído!")
+                        df_final = make_arrow_safe(df_final)
                         st.dataframe(df_final.head(50), width="stretch")
                         col_csv, col_xlsx = st.columns(2)
                         with col_csv:
