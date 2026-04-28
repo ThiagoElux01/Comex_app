@@ -4,6 +4,13 @@ import re
 from datetime import datetime
 import streamlit as st
 
+# --- GARANTIA DE TIPO DA TASA_SHAREPOINT ---
+if "Tasa_Sharepoint" not in df.columns:
+    df["Tasa_Sharepoint"] = ""
+
+# força SEMPRE string (independente do que veio do Excel ou merge)
+df["Tasa_Sharepoint"] = df["Tasa_Sharepoint"].astype("string")
+
 def adicionar_tasa_sharepoint(df, tasa_df):
     """
     Adiciona a coluna Tasa_Sharepoint ao DataFrame SharePoint,
