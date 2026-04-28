@@ -258,7 +258,7 @@ def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
 
     # Se a moeda for PEN, a Tasa_Sharepoint deve ser 1
     if "moneda" in df.columns and "Tasa_Sharepoint" in df.columns:
-        df.loc[df["moneda"].astype(str).str.upper().str.strip() == "PEN", "Tasa_Sharepoint"] = 1
+        df.loc[df["moneda"].astype(str).str.upper().str.strip() == "PEN", "Tasa_Sharepoint"] = "1"
     
     # ✔ Renomeia aqui mesmo!
     if "Tasa" in df.columns:
