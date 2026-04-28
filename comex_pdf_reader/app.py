@@ -5,40 +5,44 @@ from auth import is_authenticated
 from ui.login import render_login
 from ui.layout import app_header, sidebar_navigation
 from settings import PAGES, APP_NAME
-from ui.pages import home
-from ui.pages import process_pdfs
-from ui.pages import settings_page
-from ui.pages import downloads_page
-from ui.pages import app_archivo_gastos
+
+from ui.pages import (
+    home,
+    process_pdfs,
+    settings_page,
+    downloads_page,
+    app_archivo_gastos,
+)
 
 
 def main():
+    # ----------------- Configuração da página -----------------
     st.set_page_config(
-        page_title="COMEX PDF READER",
+        page_title=APP_NAME,
         page_icon="📄",
         layout="wide",
     )
 
-    # ---------- Login ----------
+    # ----------------- Login -----------------
     if not is_authenticated():
         render_login()
         return
 
-    # ---------- Navegação ----------
+    # ----------------- Navegação -----------------
     page = sidebar_navigation(PAGES)
 
     # Override por navegação programática (botões, fluxos guiados)
-    if st.session_state.get("_goto_page"):
+    if "_goto_page" in st.session_state:
         page = st.session_state.pop("_goto_page")
 
-    # ---------- Header dinâmico ----------
+    # ----------------- Header dinâmico -----------------
     header_title = APP_NAME
     if page == "Aplicación Archivo Gastos":
         header_title = "PLANTILLA GASTOS"
 
     app_header(title=header_title)
 
-    # ---------- Roteamento ----------
+    # ----------------- Roteamento -----------------
     if page == "Home":
         home.render()
 
@@ -55,8 +59,9 @@ def main():
         downloads_page.render()
 
     else:
-        st.error("Página não encontrada.")
+        st.error(f"Página não encontrada: {page}")
 
 
+# ----------------- Bootstrap -----------------
 if __name__ == "__main__":
     main()
