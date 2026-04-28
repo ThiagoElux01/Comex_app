@@ -3,6 +3,69 @@ import re
 from datetime import datetime
 import streamlit as st
 
+# ============================================================
+# ADICIONAR TASA SHAREPOINT (MERGE COM TASA SUNAT)
+# ============================================================
+
+def adicionar_tasa_sharepoint(df: pd.DataFrame, tasa_df: pd.DataFrame | None) -> pd.DataFrame:
+    """
+    Adiciona a coluna Tasa_Sharepoint ao DataFrame SharePoint,
+    fazendo merge seguro baseado apenas na data (ignorando hora/timezone).
+    Retorna SEMPRE Tasa_Sharepoint como STRING.
+    """
+    df = df.copy()
+
+    # Garante coluna
+    if "Tasa_Sharepoint" not in df.columns:
+        df["Tasa_Sharepoint"] = ""
+
+    # Se não houver Tasa SUNAT carregada, retorna como está
+    if tasa_df is None or tasa_df.empty:
+        df["Tasa_Sharepoint"] = df["Tasa_Sharepoint"].astype("string")
+        return df
+
+    # ------------------------------------------------------------
+    # 1) Converter Fecha_Emision para datetime (robusto)
+    # ------------------------------------------------------------
+    df["Fecha_Emision_tmp"] = pd.to_datetime(
+        df["Fecha_Emision"],
+        dayfirst=True,
+        errors="coerce"
+    ).dt.normalize()
+
+    # ------------------------------------------------------------
+    # 2) Preparar Tasa SUNAT
+    # ------------------------------------------------------------
+    tasa = tasa_df.copy()
+    tasa["Data"] = pd.to_datetime(
+        tasa["Data"],
+        dayfirst=True,
+        errors="coerce"
+    ).dt.normalize()
+
+    # ------------------------------------------------------------
+    # 3) Merge seguro
+    # ------------------------------------------------------------
+    df = df.merge(
+        tasa[["Data", "Venta"]],
+        left_on="Fecha_Emision_tmp",
+        right_on="Data",
+        how="left"
+    )
+
+    # ------------------------------------------------------------
+    # 4) Renomear e limpar
+    # ------------------------------------------------------------
+    df.rename(columns={"Venta": "Tasa_Sharepoint"}, inplace=True)
+    df.drop(columns=["Fecha_Emision_tmp", "Data"], inplace=True, errors="ignore")
+
+    # ------------------------------------------------------------
+    # 5) FORÇAR string (crítico p/ pandas + pyarrow)
+    # ------------------------------------------------------------
+    df["Tasa_Sharepoint"] = df["Tasa_Sharepoint"].astype("string")
+
+    return df
+
 
 # ============================================================
 # FUNÇÃO UNIVERSAL PARA CORRIGIR DATAS DO SHAREPOINT
@@ -43,7 +106,7 @@ def corrigir_data_sharepoint(valor) -> str:
     for fmt in formatos:
         try:
             return datetime.strptime(s, fmt).strftime("%d/%m/%Y")
-        except Exception:
+        except:
             pass
 
     meses = {
@@ -70,68 +133,10 @@ def corrigir_data_sharepoint(valor) -> str:
     for fmt in ["%d %b %Y", "%d %B %Y", "%d-%b-%Y", "%d-%B-%Y"]:
         try:
             return datetime.strptime(s_proc, fmt).strftime("%d/%m/%Y")
-        except Exception:
+        except:
             pass
 
     return ""
-
-
-# ============================================================
-# ADICIONAR TASA SHAREPOINT (MERGE COM TASA SUNAT)
-# ============================================================
-
-def adicionar_tasa_sharepoint(df: pd.DataFrame, tasa_df: pd.DataFrame | None) -> pd.DataFrame:
-    """
-    Adiciona/preenche a coluna 'tasa_sharepoint' no DataFrame SharePoint,
-    fazendo merge seguro baseado apenas na data (ignorando hora/timezone).
-    Mantém sempre 'tasa_sharepoint' como string e NÃO cria colunas duplicadas.
-    """
-    df = df.copy()
-
-    COL_TASA = "tasa_sharepoint"
-    COL_FECHA = "fecha_emision"
-
-    # garante coluna destino como string
-    if COL_TASA not in df.columns:
-        df[COL_TASA] = pd.Series("", index=df.index, dtype="string")
-    else:
-        df[COL_TASA] = df[COL_TASA].astype("string")
-
-    # sem tasa SUNAT → retorna
-    if tasa_df is None or tasa_df.empty:
-        return df
-
-    # se não houver data, não tem como mergear
-    if COL_FECHA not in df.columns:
-        return df
-
-    # 1) normaliza fecha emision no df
-    fecha_tmp = pd.to_datetime(df[COL_FECHA], dayfirst=True, errors="coerce").dt.normalize()
-
-    # 2) prepara tasa SUNAT
-    tasa = tasa_df.copy()
-    tasa_date = pd.to_datetime(tasa["Data"], dayfirst=True, errors="coerce").dt.normalize()
-    tasa_out = pd.DataFrame({"_data": tasa_date, "_venta": tasa["Venta"]})
-
-    # 3) merge com suffix para não colidir
-    df["_fecha_tmp"] = fecha_tmp
-    df = df.merge(
-        tasa_out,
-        left_on="_fecha_tmp",
-        right_on="_data",
-        how="left"
-    )
-
-    # 4) coalesce: se tasa_sharepoint estiver vazia/NA, usa a do SUNAT
-    #    (convertendo para string)
-    df[COL_TASA] = df[COL_TASA].replace("", pd.NA)
-    df[COL_TASA] = df[COL_TASA].fillna(df["_venta"].astype("string"))
-    df[COL_TASA] = df[COL_TASA].fillna("").astype("string")
-
-    # 5) limpa colunas temporárias
-    df.drop(columns=["_fecha_tmp", "_data", "_venta"], inplace=True, errors="ignore")
-
-    return df
 
 
 # ============================================================
@@ -142,7 +147,14 @@ def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     # ------------------------------------------------------------
-    # 1) Normalizar nomes das colunas PRIMEIRO (chave para não duplicar!)
+    # 0) Garantir Tasa_Sharepoint como STRING desde o início
+    # ------------------------------------------------------------
+    if "Tasa_Sharepoint" not in df.columns:
+        df["Tasa_Sharepoint"] = ""
+    df["Tasa_Sharepoint"] = df["Tasa_Sharepoint"].astype("string")
+
+    # ------------------------------------------------------------
+    # 1) Normalizar nomes das colunas
     # ------------------------------------------------------------
     df.columns = (
         df.columns
@@ -154,15 +166,7 @@ def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     # ------------------------------------------------------------
-    # 2) Garantir tasa_sharepoint como STRING (canônico)
-    # ------------------------------------------------------------
-    if "tasa_sharepoint" not in df.columns:
-        df["tasa_sharepoint"] = pd.Series("", index=df.index, dtype="string")
-    else:
-        df["tasa_sharepoint"] = df["tasa_sharepoint"].astype("string")
-
-    # ------------------------------------------------------------
-    # 3) IMPORTES NUMÉRICOS
+    # 2) IMPORTES NUMÉRICOS
     # ------------------------------------------------------------
     possiveis_nomes_importe = [
         "importe_documento",
@@ -181,7 +185,7 @@ def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
             s = s.replace(",", ".")
         try:
             return float(s)
-        except Exception:
+        except:
             return None
 
     for col in possiveis_nomes_importe:
@@ -189,7 +193,7 @@ def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = df[col].apply(clean_number)
 
     # ------------------------------------------------------------
-    # 4) DATA → fecha_emision (canônico)
+    # 3) DATA → Fecha_Emision
     # ------------------------------------------------------------
     colunas_data_possiveis = [
         "fecha_de_emisipn_del_documento",
@@ -201,15 +205,19 @@ def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
         "emision",
     ]
 
-    col_data_original = next((c for c in colunas_data_possiveis if c in df.columns), None)
+    col_data_original = None
+    for c in colunas_data_possiveis:
+        if c in df.columns:
+            col_data_original = c
+            break
 
     if col_data_original:
-        df["fecha_emision"] = df[col_data_original].apply(corrigir_data_sharepoint)
+        df["Fecha_Emision"] = df[col_data_original].apply(corrigir_data_sharepoint)
     else:
-        df["fecha_emision"] = ""
+        df["Fecha_Emision"] = ""
 
     # ------------------------------------------------------------
-    # 5) PROVEEDOR → texto antes do "-"
+    # 4) PROVEEDOR → texto antes do "-"
     # ------------------------------------------------------------
     if "proveedor" in df.columns:
         df["proveedor"] = (
@@ -221,21 +229,19 @@ def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     # ------------------------------------------------------------
-    # 6) MERGE COM TASA SUNAT (sem duplicar colunas)
+    # 5) MERGE COM TASA SUNAT
     # ------------------------------------------------------------
     tasa_df = st.session_state.get("tasa_df")
     df = adicionar_tasa_sharepoint(df, tasa_df)
 
     # ------------------------------------------------------------
-    # 7) REGRA DE NEGÓCIO → PEN = 1
+    # 6) REGRA DE NEGÓCIO → PEN = 1
     # ------------------------------------------------------------
     if "moneda" in df.columns:
+        df["Tasa_Sharepoint"] = df["Tasa_Sharepoint"].astype("string")
         df.loc[
             df["moneda"].astype(str).str.upper().str.strip() == "PEN",
-            "tasa_sharepoint"
+            "Tasa_Sharepoint"
         ] = "1"
-
-    # reforça dtype para evitar surprises no arrow
-    df["tasa_sharepoint"] = df["tasa_sharepoint"].astype("string")
 
     return df
