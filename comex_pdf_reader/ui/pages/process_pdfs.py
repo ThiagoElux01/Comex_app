@@ -8,7 +8,7 @@ from ui.pages import downloads_page
 ADICIONALES_AVAILABLE = True
 ADICIONALES_ERR = None
 try:
-    from services.adicionales_service import process_adicimonales_streamlit
+    from services.adicionales_service import process_adicionales_streamlit
 except Exception as e:
     ADICIONALES_AVAILABLE = False
     ADICIONALES_ERR = e
