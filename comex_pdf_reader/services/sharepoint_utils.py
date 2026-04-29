@@ -18,7 +18,7 @@ def adicionar_tasa_sharepoint(df: pd.DataFrame, tasa_df: pd.DataFrame | None) ->
     # Garante coluna
     
     if "tasa_sharepoint" not in df.columns:
-    df["tasa_sharepoint"] = ""
+        df["tasa_sharepoint"] = ""
 
     # Se não houver Tasa SUNAT carregada, retorna como está
     if tasa_df is None or tasa_df.empty:
