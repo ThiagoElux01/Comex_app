@@ -1,4 +1,3 @@
-
 # services/adicionales_service.py
 from io import BytesIO
 from typing import List, Optional
