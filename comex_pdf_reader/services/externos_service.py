@@ -163,9 +163,14 @@ def process_externos_streamlit(
 
         df["Lineaabajo"] = df["conteudo_pdf"].apply(detectar_linea)
 
-        # 🔹 NOVO → fallback com PG
+        # 1) Fallback usando Lineaabajo do SharePoint
+        if "Lineaabajo_sharepoint" in df.columns:
+            df["Lineaabajo"] = df["Lineaabajo"].combine_first(df["Lineaabajo_sharepoint"])
+        
+        # 2) Fallback usando PG (se ainda vazio)
         if "PG" in df.columns:
             df["Lineaabajo"] = df["Lineaabajo"].combine_first(df["PG"])
+
 
         # Organiza e remove duplicatas
         df = organizar_colunas_externos(df)
