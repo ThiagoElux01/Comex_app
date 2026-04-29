@@ -990,7 +990,7 @@ def render():
                 st.session_state["sharepoint_df"] = df_all
     
                 st.success("✔️ DataFrame atualizado")
-                st.dataframe(df_all, use_container_width=True, height=500)
+                st.dataframe(df_all, width="stretch", height=500)
     
                 st.subheader("⬇️ Downloads do Arquivo SharePoint")
                 col_csv, col_xlsx = st.columns(2)
@@ -1001,7 +1001,7 @@ def render():
                         data=df_all.to_csv(index=False).encode("utf-8"),
                         file_name="sharepoint_all.csv",
                         mime="text/csv",
-                        use_container_width=True,
+                        width="stretch",
                         key="sharepoint_csv"
                     )
     
@@ -1023,7 +1023,7 @@ def render():
                         data=buffer,
                         file_name="sharepoint_all.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True,
+                        width="stretch",
                         key="sharepoint_xlsx"
                     )
     
