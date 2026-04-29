@@ -662,6 +662,7 @@ def gerar_duas_xlsx_segunda_aba(xls_file):
 # -----------------------------
 def render():
     _ensure_state()
+    df_final = None  # ✅ OBRIGATÓRIO
     st.subheader("Aplicación Comex")
 
     tab4, tab2, tab3, tab1, tab5 = st.tabs([
