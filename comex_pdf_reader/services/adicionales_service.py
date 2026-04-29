@@ -1,141 +1,601 @@
 
-# services/adicionales_service.py
-from io import BytesIO
-from typing import List, Optional
-import fitz  # PyMuPDF
+# services/adicionales_utils.py
+import re
+import unicodedata
+from datetime import datetime
 import pandas as pd
-import streamlit as st
 
-from services.adicionales_utils import (
-    extrair_ruc, extrair_facturas, remover_ruc_indesejado, criar_coluna_proveedor_iscala,
-    extrair_fecha_emision, normalizar_data, extrair_moneda, ajustar_e_padronizar_moneda,
-    codificar_moneda, extrair_op_gravada, limpar_op_gravada, formatar_op_gravada,
-    atribuir_cuenta, error, adicionar_coluna_tasa, organizar_colunas_adicionales,
-    extrair_tipo_doc, padronizar_tipo_doc, Ajustar_nro_nota_credito,
-    adicionar_cod_autorizacion_adicionales, adicionar_tip_doc_adicionales,
-    remover_duplicatas_source_file, op_gravada_negativo_CN
-)
+# --- EXTRAÇÕES BÁSICAS ---
 
-def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
-    try:
-        with fitz.open(stream=BytesIO(pdf_bytes), filetype="pdf") as doc:
-            text = "".join(page.get_text() for page in doc)
-            return text if text.strip() else "[PDF baseado em imagem - sem texto extraível]"
-    except Exception:
-        return "[Erro ao abrir/ler o PDF]"
+def extrair_ruc(texto: str) -> str:
+    match1 = re.search(r'R\.U\.C.*?(\d{11})', texto)
+    if match1:
+        return match1.group(1).strip()
+    match2 = re.search(r'RUC:\s*(\d{11})', texto)
+    if match2:
+        return match2.group(1).strip()
+    match3 = re.search(r'RUC N°\s*(\d{11})', texto)
+    if match3:
+        return match3.group(1).strip()
+    return ""
 
-def process_adicionales_streamlit(
-    uploaded_files: List,
-    progress_widget=None,
-    status_widget=None,
-    cambio_df: Optional[pd.DataFrame] = None,
-) -> Optional[pd.DataFrame]:
-    if not uploaded_files:
-        return None
+def extrair_facturas(texto: str) -> str:
+    for pattern in [
+        r'F\d{3}[-\s]*\d{9}',
+        r'F\d{3}[-\s]*\d{8}',
+        r'F\d{3}[-\s]*\d{5,7}',
+        r'F\d{2}[-\s]*\d{5,7}',
+        r'INV-[A-Z]+-\d{8}',
+        r'Número de Invoice\(Invoice No\.\)\s*:\s*([A-Z]{4}\d{9})',
+        r'\bPECLLP\d{9}\b',
+        r'F\d{3}[-\s]*\d{4}',
+    ]:
+        m = re.search(pattern, texto)
+        if m:
+            g = m.group(1) if m.lastindex else m.group(0)
+            return g.replace(" ", "").strip()
+    return ""
 
-    rows = []
-    total = len(uploaded_files)
-    for i, f in enumerate(uploaded_files, start=1):
-        fname = getattr(f, "name", f"arquivo_{i}.pdf")
-        text = _extract_text_from_pdf_bytes(f.getvalue())
-        rows.append({"source_file": fname, "conteudo_pdf": text})
-
-        if progress_widget:
-            pct = int(i / total * 100)
-            progress_widget.progress(pct, text=f"Lendo {fname} ({i}/{total})")
-        if status_widget:
-            status_widget.write(f"📄 Lido: **{fname}**")
-
-    df = pd.DataFrame(rows)
-
-    # --- Pipeline ---
-    df["R.U.C"] = df["conteudo_pdf"].apply(extrair_ruc)
-    df = remover_ruc_indesejado(df)
-    df = criar_coluna_proveedor_iscala(df)
-
-    df["Factura"] = df["conteudo_pdf"].apply(extrair_facturas)
-    df["Fecha de Emisión"] = df["conteudo_pdf"].apply(extrair_fecha_emision).apply(normalizar_data)
-
-    df["Moneda"] = df["conteudo_pdf"].apply(extrair_moneda).apply(ajustar_e_padronizar_moneda)
-    df["Cod. Moneda"] = df["Moneda"].apply(codificar_moneda)
-
-    df["Tipo Doc"] = df.apply(extrair_tipo_doc, axis=1)
-    df = padronizar_tipo_doc(df)
-
-    df["Op. Gravada"] = df.apply(extrair_op_gravada, axis=1).apply(limpar_op_gravada).apply(formatar_op_gravada)
-    df = op_gravada_negativo_CN(df)
-
-    df["Cuenta"] = df["Cod. Moneda"].apply(atribuir_cuenta)
-    df["Error"] = df["Proveedor Iscala"].apply(error)
-
-    # Tasa (merge por data)
-    df = adicionar_coluna_tasa(df, cambio_df=cambio_df)
-    if "Cod. Moneda" in df.columns:
-        df.loc[df["Cod. Moneda"] == "00", "Tasa"] = 1
-
-    df = Ajustar_nro_nota_credito(df)
-    df = adicionar_cod_autorizacion_adicionales(df)
-    df = adicionar_tip_doc_adicionales(df)
-    df = organizar_colunas_adicionales(df)
-    df = remover_duplicatas_source_file(df)
-    df = df.drop(columns=["conteudo_pdf"], errors="ignore")
-
-    
-    from services.adicionales_utils import adicionar_sharepoint_adicionales
-    sharepoint_df = st.session_state.get("sharepoint_df")
-    df = adicionar_sharepoint_adicionales(df, sharepoint_df)
-
-    if progress_widget:
-        progress_widget.progress(100, text="Concluído (Gastos Adicionales).")
-    if status_widget:
-        status_widget.success("Pipeline Adicionales finalizado.")
-        
-    # ------------------------------------------
-    # COMPLEMENTAR CAMPOS VAZIOS (ADICIONALES)
-    # ------------------------------------------
-    def preencher_vazio(dest_col, src_col):
-        if dest_col in df.columns and src_col in df.columns:
-            df[dest_col] = df[dest_col].fillna("").replace("", None)
-            df[src_col] = df[src_col].fillna("").replace("", None)
-            df[dest_col] = df[dest_col].combine_first(df[src_col])
-    
-    # 1) R.U.C ← fornecedor (coluna "proveedor" no SharePoint)
-    preencher_vazio("R.U.C", "proveedor")
-    
-    # 2) Proveedor Iscala ← proveedor
-    preencher_vazio("Proveedor Iscala", "proveedor")
-    
-    # 3) Factura ← numero_de_documento
-    preencher_vazio("Factura", "numero_de_documento")
-    
-    # 4) Tipo Doc ← tipo_doc
-    preencher_vazio("Tipo Doc", "tipo_doc")
-    
-    # 5) Fecha de Emisión ← Fecha_Emision
-    preencher_vazio("Fecha de Emisión", "Fecha_Emision")
-    
-    # 6) Moneda ← moneda
-    preencher_vazio("Moneda", "moneda")
-    
-    # 7) Amount / Op. Gravada ← importe_documento
-    if "Op. Gravada" in df.columns: 
-        preencher_vazio("Op. Gravada", "importe_documento")
-    
-    # 8) Tasa ← Tasa_Sharepoint
-    preencher_vazio("Tasa", "Tasa_Sharepoint")
-
-    # (depois do seu bloco preencher_vazio(...))
-
-    df = adicionar_cod_autorizacion_adicionales(df)
-    df = adicionar_tip_doc_adicionales(df)
-
-    
-    # 1) Cod. Moneda a partir de "Moneda" (que pode ter vindo do SharePoint)
-    if "Moneda" in df.columns:
-        df["Cod. Moneda"] = df["Moneda"].apply(codificar_moneda)
-    
-    # 2) Cuenta a partir de "Cod. Moneda" (01 → 421202, 00 → 421201)
-    if "Cod. Moneda" in df.columns:
-        df["Cuenta"] = df["Cod. Moneda"].apply(atribuir_cuenta)
-
+def remover_ruc_indesejado(df: pd.DataFrame, ruc_indesejado="20100073308") -> pd.DataFrame:
+    df["R.U.C"] = df["R.U.C"].apply(lambda x: "" if x == ruc_indesejado else x)
     return df
+
+def criar_coluna_proveedor_iscala(df: pd.DataFrame) -> pd.DataFrame:
+    def definir_valor(row):
+        txt = row["conteudo_pdf"]
+        if "EVERGREEN LINE" in txt:
+            return "EVERGREEN"
+        elif "MSC Mediterranean Shipping Company S.A." in txt:
+            return "MSC"
+        elif "WANHAI" in txt:
+            return "WAN HAI"
+        elif row["R.U.C"]:
+            return row["R.U.C"][2:-1]
+        else:
+            return ""
+    df["Proveedor Iscala"] = df.apply(definir_valor, axis=1)
+    return df
+
+
+# --- FECHA DE EMISIÓN ---
+
+def extrair_fecha_emision(texto: str) -> str:
+    linhas = texto.splitlines()
+    for i in range(len(linhas)):
+        linha = linhas[i].strip()
+        linha_up = linha.upper()
+
+        m_emision = re.search(r'F\.?\s*DE\s+EMISI[ÓO]N\s*[:\-]?\s*(\d{4}[-/]\d{2}[-/]\d{2})', linhas[i], re.IGNORECASE)
+        if m_emision:
+            return m_emision.group(1)
+
+        if linha_up == "F. DE" and i + 1 < len(linhas):
+            proxima = linhas[i + 1].strip()
+            m = re.search(r'[:\-]?\s*(\d{4}[-/]\d{2}[-/]\d{2})', proxima)
+            if m:
+                return m.group(1)
+
+        if "FECHA DE EMISIÓN" in linha_up or "FECHA DE EMISION" in linha_up:
+            m_inline = re.search(r'FECHA DE EMISI[ÓO]N[:\s]*([0-9]{2}[-/][0-9]{2}[-/][0-9]{4})', linha_up)
+            if m_inline:
+                return m_inline.group(1)
+            if i > 0:
+                prev = linhas[i - 1].strip()
+                if re.match(r'\d{2}[-/]\d{2}[-/]\d{4}', prev) or re.match(r'\d{4}[-/]\d{2}[-/]\d{2}', prev):
+                    return prev
+
+        if linha_up == "FECHA" and i + 2 < len(linhas):
+            if linhas[i + 1].strip().upper() == "EMISIÓN":
+                data_line = linhas[i + 2].strip()
+                m = re.search(r'\d{2}[-/]\d{2}[-/]\d{4}', data_line)
+                if m:
+                    return m.group(0)
+
+        if "R.U.C. N°" in linha_up and i + 1 < len(linhas):
+            prox = linhas[i + 1].strip()
+            if re.match(r'\d{4}[-/]\d{2}[-/]\d{2}', prox):
+                return prox
+
+        if "DOLARES AMERICANOS" in linha_up and i >= 2:
+            cand = linhas[i - 2].strip()
+            if re.match(r'\d{2}[-/]\d{2}[-/]\d{4}', cand):
+                return cand
+
+        if linha_up in ("FECHA DE EMISIÓN", "FECHA DE EMISION") and i > 0:
+            prev = linhas[i - 1].strip()
+            if re.match(r'\d{4}[-/]\d{2}[-/]\d{2}', prev):
+                return prev
+
+        if "FECHA EMISIÓN:" in linha_up or "FECHA DE EMISIÓN:" in linha_up:
+            if i > 0:
+                acima = linhas[i - 1].strip()
+                m = re.search(r'\d{2}[-/]\d{2}[-/]\d{4}|\d{4}[-/]\d{2}[-/]\d{2}', acima)
+                if m:
+                    return m.group(0)
+
+        if "FECHA DE EMISIÓN" in linha_up or "FECHA DE EMISION" in linha_up:
+            for offset in range(1, 17):
+                if i + offset < len(linhas):
+                    ld = linhas[i + offset].strip()
+                    if re.match(r'\d{4}[-/]\d{2}[-/]\d{2}', ld):
+                        return ld
+
+    for i in range(1, len(linhas)):
+        if linhas[i].strip().upper() in ["FECHA:", "FECHA"]:
+            ant = linhas[i - 1].strip()
+            m = re.search(r'\d{2}/\d{2}/\d{4}', ant)
+            if m:
+                return m.group(0)
+
+    for i in range(len(linhas) - 3):
+        if "FACTURA" in linhas[i].strip().upper():
+            ld = linhas[i + 3].strip()
+            m = re.match(r'\d{2}-[A-Z][a-z]{2}-\d{4}', ld)
+            if m:
+                return m.group(0)
+
+    m = re.search(r'FECHA EMISI[ÓO]N\(ISSUE DATE\)\s*[:\-]?\s*(\d{4}[-/]\d{2}[-/]\d{2})', texto.upper())
+    if m:
+        return m.group(1)
+    return ""
+
+def normalizar_data(data):
+    formatos = ["%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d", "%Y-%m-%d", "%d-%b-%Y", "%d-%B-%Y"]
+    if not isinstance(data, str):
+        return data
+    for fmt in formatos:
+        try:
+            dt = datetime.strptime(data.strip(), fmt)
+            return dt.strftime("%d/%m/%Y")
+        except ValueError:
+            continue
+    return data
+
+
+# --- MOEDA ---
+
+def extrair_moneda(texto: str) -> str:
+    linhas = texto.splitlines()
+    palavras_chave = ["MONEDA", "CURRENCY", "TIPO DE CAMBIO", "WAN HAI", "GRAN TOTAL:"]
+    padroes_moeda = ["DÓLAR", "DOLAR", "USD", "US DÓLARES", "SOLES", "PEN", "EUROS", "EUR"]
+
+    for i, linha in enumerate(linhas):
+        up = linha.upper()
+
+        if any(p in up for p in palavras_chave):
+            m_inline = re.search(r'(MONEDA|CURRENCY)\s*[:\-]?\s*([A-Z\s]+)', up)
+            if m_inline:
+                moeda = m_inline.group(2).strip()
+                if any(m in moeda for m in padroes_moeda):
+                    return moeda.title()
+
+            for j in range(-5, 6):
+                if j == 0:
+                    continue
+                idx = i + j
+                if 0 <= idx < len(linhas):
+                    prox = linhas[idx].strip().upper()
+                    if any(m in prox for m in padroes_moeda):
+                        return prox.title()
+    return ""
+
+def ajustar_e_padronizar_moneda(valor: str) -> str:
+    if not isinstance(valor, str):
+        return valor
+    val = ''.join(c for c in unicodedata.normalize('NFD', valor) if unicodedata.category(c) != 'Mn').upper()
+    m = re.search(r'(DOLARES.*)', val)
+    if m:
+        val = m.group(1).strip()
+    subs = {
+        "DOLARES": "USD", "DOLAR AMERICANO": "USD", "DOLARES AMERICANOS": "USD",
+        "CTA CTE BBVA - USD": "USD", "USD": "USD", "DOLARES AMERICANOS (US$)": "USD",
+        "SOLES (S/)": "PEN", "PEN": "PEN", "SOLES": "PEN", "S/": "PEN", "US$": "USD",
+    }
+    for k, v in subs.items():
+        if k in val:
+            return v
+    return valor.strip().title()
+
+def codificar_moneda(valor: str) -> str:
+    if valor == "USD":
+        return "01"
+    elif valor == "PEN":
+        return "00"
+    return ""
+
+
+# --- OP. GRAVADA ---
+
+def extrair_op_gravada(row) -> str:
+    linhas = row['conteudo_pdf'].splitlines()
+    prov = row['Proveedor Iscala']
+    tipo = str(row.get('Tipo Doc', '')).upper()
+
+    if prov == '25206207' and tipo == 'NOTA DE CRÉDITO':
+        for i, linha in enumerate(linhas):
+            if "OP. GRAVADA" in linha.upper() and i >= 7:
+                return linhas[i - 7].strip()
+
+    if prov == '10001013':
+        for i, linha in enumerate(linhas):
+            if "SON:" in linha and i >= 8:
+                return linhas[i - 8].strip()
+
+    elif prov == '25981421':
+        for i, linha in enumerate(linhas):
+            if "SON:" in linha and i >= 10:
+                return linhas[i - 10].strip()
+
+    elif prov == '34528608':
+        for i, linha in enumerate(linhas):
+            if "Total Gravado" in linha and i + 1 < len(linhas):
+                return linhas[i + 1].strip()
+
+    elif prov == '60342509':
+        for i, linha in enumerate(linhas):
+            if "Total Valor de Venta - Operaciones Gravadas:" in linha and i + 1 < len(linhas):
+                return linhas[i + 1].strip()
+
+    elif prov == '25206207':
+        for i, linha in enumerate(linhas):
+            if "OP. INAFECTA" in linha and i >= 1:
+                return linhas[i - 1].strip()
+
+    elif prov == '51346238':
+        for i, linha in enumerate(linhas):
+            if "OP. GRAVADAS:" in linha and i >= 2:
+                return linhas[i - 2].strip()
+
+    elif prov == '60037433':
+        for i, linha in enumerate(linhas):
+            if "SON:" in linha and i + 8 < len(linhas):
+                return linhas[i + 8].strip()
+
+    elif prov == '10001021':
+        for i, linha in enumerate(linhas):
+            if "OP. GRAVADAS:" in linha and i >= 2:
+                return linhas[i - 2].strip()
+
+    elif prov == '51092775':
+        for i, linha in enumerate(linhas):
+            if "Operación gravada" in linha and i >= 1:
+                return linhas[i - 1].strip()
+
+    elif prov == '34764689':
+        for i, linha in enumerate(linhas):
+            if "Son: " in linha:
+                if i + 1 < len(linhas):
+                    return linhas[i + 1].strip()
+
+    elif prov == 'WAN HAI':
+        for i, linha in enumerate(linhas):
+            if "Son:" in linha and i >= 2:
+                return linhas[i - 2].strip()
+
+    if prov == 'EVERGREEN':
+        for linha in linhas:
+            if "Total Amount(Monto total): " in linha:
+                return linha.strip()
+
+    elif prov == 'MSC':
+        for i, linha in enumerate(linhas):
+            if "SON:" in linha and i >= 5:
+                return linhas[i - 5].strip()
+
+    elif prov == '61092558':
+        for i, linha in enumerate(linhas):
+            if "Total Valor de Venta - Operaciones Gravadas:" in linha and i + 1 < len(linhas):
+                return linhas[i + 1].strip()
+
+    elif prov == '54308388':
+        for i, linha in enumerate(linhas):
+            if "Total Valor de Venta - Operaciones Gravadas:" in linha and i + 1 < len(linhas):
+                return linhas[i + 1].strip()
+
+    return ""
+
+def limpar_op_gravada(valor):
+    if isinstance(valor, str):
+        return re.sub(r'[^0-9,\.]', '', valor)
+    return valor
+
+def formatar_op_gravada(valor):
+    if isinstance(valor, str):
+        if ',' in valor and '.' in valor:
+            valor = valor.replace(',', '')
+        valor = valor.replace('.', ',')  # visual
+        valor = valor.replace(',', '.')  # numérico
+        try:
+            return float(valor)
+        except ValueError:
+            return None
+    return valor
+
+def op_gravada_negativo_CN(df: pd.DataFrame) -> pd.DataFrame:
+    if 'Tipo Doc' in df.columns and 'Op. Gravada' in df.columns:
+        df['Op. Gravada'] = df.apply(
+            lambda r: -abs(r['Op. Gravada']) if str(r['Tipo Doc']).strip().upper() in ('NOTA DE CRÉDITO', 'NOTA DE CREDITO') else r['Op. Gravada'],
+            axis=1
+        )
+    return df
+
+
+# --- TIPO DOC ---
+
+def extrair_tipo_doc(row) -> str:
+    texto = row["conteudo_pdf"]
+    fornecedor = row["Proveedor Iscala"]
+    linhas = texto.splitlines()
+
+    if fornecedor == "10001013" and len(linhas) >= 3:
+        return linhas[2].strip()
+    elif fornecedor == "34528608" and len(linhas) >= 8:
+        return linhas[7].strip()
+    elif fornecedor == "25981421" and len(linhas) >= 3:
+        return linhas[2].strip()
+    elif fornecedor == "60342509" and len(linhas) >= 3:
+        return linhas[2].strip()
+    elif fornecedor == "25206207":
+        if len(linhas) >= 4 and "FACTURA" in linhas[3].upper():
+            return linhas[3].strip()
+        elif len(linhas) >= 6:
+            return linhas[5].strip()
+    elif fornecedor == "51346238":
+        idxs = [i for i, ln in enumerate(linhas) if "FECHA EMISION" in ln.upper() or "FECHA EMISIÓN" in ln.upper()]
+        if idxs:
+            idx = idxs[1] if len(idxs) >= 2 else idxs[0]
+            if idx >= 2:
+                return linhas[idx - 2].strip()
+            elif idx > 0:
+                return linhas[idx - 1].strip()
+            return linhas[idx].strip()
+    elif fornecedor == "60037433" and len(linhas) >= 5:
+        return linhas[4].strip()
+    elif fornecedor == "10001021":
+        idxs = [i for i, ln in enumerate(linhas) if "FECHA EMISION" in ln.upper() or "FECHA EMISIÓN" in ln.upper()]
+        if idxs:
+            idx = idxs[1] if len(idxs) >= 2 else idxs[0]
+            for off in (3, 2, 1, 0):
+                if idx - off >= 0:
+                    return linhas[idx - off].strip()
+    elif fornecedor == "51092775" and len(linhas) >= 11:
+        return linhas[10].strip()
+    elif fornecedor == "34764689" and len(linhas) >= 1:
+        return linhas[0].strip()
+    elif fornecedor == "WAN HAI" and len(linhas) >= 1:
+        return linhas[0].strip()
+    elif fornecedor == "EVERGREEN":
+        for i, ln in enumerate(linhas):
+            if "FECHA EMISION" in ln.upper() or "FECHA EMISIÓN" in ln.upper():
+                if i >= 1:
+                    return linhas[i - 1].strip()
+    elif fornecedor == "MSC" and len(linhas) >= 1:
+        return linhas[0].strip()
+    elif fornecedor == "61092558" and len(linhas) >= 3:
+        return linhas[2].strip()
+    elif fornecedor == "54308388" and len(linhas) >= 7:
+        return linhas[6].strip()
+    return ""
+
+def padronizar_tipo_doc(df: pd.DataFrame) -> pd.DataFrame:
+    subs = {
+        "FACTURA ELECTRÓNICA": "FACTURA",
+        "FACTURA ELECTRONICA": "FACTURA",
+        "FACTURA  ELECTRÓNICA": "FACTURA",
+        "ELECTRONIC INVOICE": "FACTURA",
+        "INVOICE": "FACTURA",
+        "NOTA DE CRÉDITO ELECTRÓNICA": "NOTA DE CRÉDITO",
+        "NOTA DE CREDITO": "NOTA DE CRÉDITO",
+        "NOTA DE CRÉDITO": "NOTA DE CRÉDITO",
+        "Factura": "FACTURA",
+    }
+    df["Tipo Doc"] = df["Tipo Doc"].replace(subs)
+    return df
+
+
+# --- OUTRAS REGRAS ---
+
+def Ajustar_nro_nota_credito(df: pd.DataFrame) -> pd.DataFrame:
+    def limpar_valor(v: str) -> str:
+        return (v.replace("Nro", "").replace("N°", "").replace(".", "").replace(" ", "").strip())
+
+    def get_factura(row):
+        proveedor = str(row['Proveedor Iscala']).strip()
+        tipo_doc = str(row.get('Tipo Doc', '')).strip().upper()
+        linhas_pdf = row['conteudo_pdf'].splitlines()
+
+        if tipo_doc == 'NOTA DE CRÉDITO':
+            if proveedor == '10001013' and len(linhas_pdf) > 1:
+                return limpar_valor(linhas_pdf[1])
+            elif proveedor == '25206207' and len(linhas_pdf) > 0:
+                return limpar_valor(linhas_pdf[0])
+            elif proveedor == '10001021':
+                for i, linha in enumerate(linhas_pdf):
+                    if 'NOTA DE CREDITO' in linha.upper() and i > 0:
+                        return limpar_valor(linhas_pdf[i - 1])
+            elif proveedor == '61092558' and len(linhas_pdf) > 2:
+                return limpar_valor(linhas_pdf[1])
+
+        return limpar_valor(str(row.get('Factura', '')))
+
+    df['Factura'] = df.apply(get_factura, axis=1)
+    return df
+
+def atribuir_cuenta(cod_moneda: str) -> str:
+    if cod_moneda == "01":
+        return "421202"
+    elif cod_moneda == "00":
+        return "421201"
+    return ""
+
+def error(valor: str) -> str:
+    return "Can't read the file" if valor == "" else ""
+
+# Reaproveita a lógica de merge com Tasa do DUAS
+from services.duas_utils import adicionar_coluna_tasa  # [2](https://electrolux-my.sharepoint.com/personal/thiago_farias_electrolux_com/Documents/Microsoft%20Copilot%20Chat%20Files/process_pdfs.py)
+
+# services/adicionales_utils.py  (SUBSTITUIR OU ADAPTAR)
+
+import pandas as pd
+import unicodedata
+
+def _norm_text_adic(s: str) -> str:
+    """Remove acentos, upper e strip — robusto para comparar Tipo Doc."""
+    if s is None:
+        return ""
+    s = str(s)
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+    return s.upper().strip()
+
+def _tipo_doc_padrao_adic(valor: str) -> str:
+    """
+    Normaliza variações:
+      FACTURA / INVOICE               -> 'FACTURA'
+      NOTA DE CRÉDITO / CREDIT NOTE   -> 'NOTA_CREDITO'
+    """
+    t = _norm_text_adic(valor)
+    if t in {"FACTURA", "INVOICE"}:
+        return "FACTURA"
+    if t in {
+        "NOTA DE CREDITO",
+        "NOTA CREDITO",
+        "NOTA DE CREDITO ELECTRONICA",
+        "NOTA CREDITO ELECTRONICA",
+        "CREDIT NOTE",
+    }:
+        return "NOTA_CREDITO"
+    return ""
+
+def adicionar_cod_autorizacion_adicionales(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    ADICIONALES — Idempotente:
+      FACTURA      -> '01'
+      NOTA CRÉDITO -> '07'
+    Preenche apenas onde 'Cód. de Autorización' está vazio.
+    """
+    if "Tipo Doc" not in df.columns:
+        return df
+
+    # garante coluna e normaliza vazios
+    if "Cód. de Autorización" not in df.columns:
+        df["Cód. de Autorización"] = None
+    df["Cód. de Autorización"] = df["Cód. de Autorización"].fillna("").replace("", None)
+
+    tipo_std = df["Tipo Doc"].map(_tipo_doc_padrao_adic)
+    mask_vazio = df["Cód. de Autorización"].isna()
+
+    df.loc[mask_vazio & (tipo_std == "FACTURA"), "Cód. de Autorización"] = "01"
+    df.loc[mask_vazio & (tipo_std == "NOTA_CREDITO"), "Cód. de Autorización"] = "07"
+    return df
+
+def adicionar_tip_doc_adicionales(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    ADICIONALES — Idempotente:
+      FACTURA      -> '01'
+      NOTA CRÉDITO -> '01'
+    Preenche apenas onde 'Tipo de Factura' está vazio.
+    """
+    if "Tipo Doc" not in df.columns:
+        return df
+
+    if "Tipo de Factura" not in df.columns:
+        df["Tipo de Factura"] = None
+    df["Tipo de Factura"] = df["Tipo de Factura"].fillna("").replace("", None)
+
+    tipo_std = df["Tipo Doc"].map(_tipo_doc_padrao_adic)
+    mask_vazio = df["Tipo de Factura"].isna()
+
+    df.loc[mask_vazio & (tipo_std == "FACTURA"), "Tipo de Factura"] = "01"
+    df.loc[mask_vazio & (tipo_std == "NOTA_CREDITO"), "Tipo de Factura"] = "01"
+    return df
+
+def organizar_colunas_adicionales(df: pd.DataFrame) -> pd.DataFrame:
+    desejadas = [
+        'source_file', 'conteudo_pdf', 'R.U.C', 'Proveedor Iscala', 'Factura', 'Tipo Doc',
+        'Cód. de Autorización', 'Tipo de Factura', 'Fecha de Emisión', 'Moneda',
+        'Cod. Moneda', 'Op. Gravada', 'Tasa', 'Cuenta', 'Error'
+    ]
+    presentes = [c for c in desejadas if c in df.columns]
+    return df[presentes + [c for c in df.columns if c not in presentes]]
+
+def remover_duplicatas_source_file(df: pd.DataFrame) -> pd.DataFrame:
+    return df.drop_duplicates(subset='source_file', keep='first')
+
+
+import pandas as pd
+import re
+
+
+def merge_sharepoint_adicionales(df_adic, df_sp):
+
+    df_ext = df_adic.copy()
+    df_sp = df_sp.copy()
+
+    # Padroniza colunas já renomeadas no SharePoint
+    renames = {
+        "#pec": "PEC",
+        "pec": "PEC",
+        "fecha_de_emisipn_del_documento": "Fecha_Emision",
+    }
+    df_sp = df_sp.rename(columns=renames)
+
+    # Função para limpar espaços invisíveis, múltiplos espaços e normalizar nomes
+    import re
+    def normalizar_nome(s):
+        if s is None:
+            return ""
+        s = str(s)
+        s = s.replace("\u200b", "")      # zero-width space invisível
+        s = s.replace("\u00a0", " ")     # no-break space
+        s = re.sub(r"\s+", " ", s)       # múltiplos espaços -> 1 espaço
+        return s.lower().strip()         # minúsculas e trim
+
+    # Normaliza texto para comparação (AGORA SIM!)
+    df_ext["key_ext"] = df_ext["source_file"].apply(normalizar_nome)
+    df_sp["key_sp"]  = df_sp["name"].apply(normalizar_nome)
+
+    # Merge cartesiano
+    df_ext["_tmp"] = 1
+    df_sp["_tmp"] = 1
+    df_all = df_ext.merge(df_sp, on="_tmp")
+
+    # Compatibilidade textual
+    def match(row):
+        ext = row["key_ext"]
+        sp  = row["key_sp"]
+        return ext in sp or sp in ext
+
+    df_all = df_all[df_all.apply(match, axis=1)]
+
+    # Colunas extras a trazer
+    colunas_extras = [
+        "PEC",
+        "proveedor",
+        "importe_documento",
+        "moneda",
+        "tipo_doc",
+        "numero_de_documento",
+        "Fecha_Emision",
+        "Tasa_Sharepoint",
+    ]
+    colunas_extras = [c for c in colunas_extras if c in df_all.columns]
+
+    df_merge = df_all[["source_file"] + colunas_extras].drop_duplicates()
+
+    # Merge final no DF Adicionales
+    df_final = df_ext.merge(df_merge, on="source_file", how="left")
+
+    # Remove colunas auxiliares
+    df_final = df_final.drop(columns=["key_ext", "_tmp"], errors="ignore")
+
+
+    # Remover duplicadas — mantém última versão
+    df_final = df_final.loc[:, ~df_final.columns.duplicated(keep="last")]
+    
+    return df_final
+
+def adicionar_sharepoint_adicionales(df_adic, df_sharepoint):
+    if df_sharepoint is None or df_sharepoint.empty:
+        return df_adic
+    return merge_sharepoint_adicionales(df_adic, df_sharepoint)
