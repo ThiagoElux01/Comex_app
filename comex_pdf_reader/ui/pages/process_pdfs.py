@@ -662,7 +662,6 @@ def gerar_duas_xlsx_segunda_aba(xls_file):
 # -----------------------------
 def render():
     _ensure_state()
-    df_final = None  # ✅ OBRIGATÓRIO
     st.subheader("Aplicación Comex")
 
     tab4, tab2, tab3, tab1, tab5 = st.tabs([
@@ -859,7 +858,6 @@ def render():
 
                 elif acao == "gastos":
                     if not ADICIONALES_AVAILABLE:
-                        df_final = None  # ✅ proteção local
                         st.error("Gastos Adicionales indisponível: confira dependências e `services/adicionales_service.py`.")
                     else:
                         cambio_df = st.session_state.get("tasa_df")
