@@ -168,8 +168,8 @@ def process_externos_streamlit(
             df["Lineaabajo"] = df["Lineaabajo"].combine_first(df["Lineaabajo_sharepoint"])
         
         # 2) Fallback usando PG (se ainda vazio)
-        if "PG" in df.columns:
-            df["Lineaabajo"] = df["Lineaabajo"].combine_first(df["PG"])
+        if "pg" in df.columns:
+            df["Lineaabajo"] = df["Lineaabajo"].combine_first(df["pg"])
 
 
         # Organiza e remove duplicatas
