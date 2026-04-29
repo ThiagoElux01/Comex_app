@@ -724,7 +724,7 @@ def render():
                 nome_acao = ACTIONS[acao]
                 status = st.empty()
                 progress = st.progress(0, text=f"Iniciando fluxo {nome_acao}...")
-                df_final = None  # ✅✅✅ LINHA CRÍTICA (coloque aqui)
+
                 if acao == "duas":
                     cambio_df = st.session_state.get("tasa_df")
                     if cambio_df is None or getattr(cambio_df, "empty", True):
@@ -868,7 +868,6 @@ def render():
                             cambio_df=cambio_df
                         )
                     if df_final is not None and not df_final.empty:
-                        df_final = None  # ✅ inicialização defensiva
                         st.success("Gastos Adicionales concluído!")
                         df_final = make_arrow_safe(df_final)
                         st.dataframe(df_final.head(50), width="stretch")
