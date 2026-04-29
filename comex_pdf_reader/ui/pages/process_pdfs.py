@@ -970,7 +970,9 @@ def render():
             )
 
             if "all" not in xls.sheet_names:
-                raise ValueError(f"A aba 'all' não foi encontrada. Abas: {xls.sheet_names}")
+                raise ValueError(
+                    f"A aba 'all' não foi encontrada. Abas disponíveis: {xls.sheet_names}"
+                )
 
             df_all = pd.read_excel(
                 xls,
@@ -1029,7 +1031,7 @@ def render():
         except Exception as e:
             st.error("❌ Erro ao processar o arquivo do SharePoint.")
             st.exception(e)
-            
+   
     with tab4:
         downloads_page.render()
 
