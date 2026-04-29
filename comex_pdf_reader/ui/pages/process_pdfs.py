@@ -662,8 +662,9 @@ def gerar_duas_xlsx_segunda_aba(xls_file):
 # -----------------------------
 def render():
     _ensure_state()
+    df_final = None   # ✅ GARANTE que a variável exista
     st.subheader("Aplicación Comex")
-
+    
     tab4, tab2, tab3, tab1, tab5 = st.tabs([
         "📦 Arquivos modelo",
         "🌐 Tasa SUNAT",
@@ -867,6 +868,15 @@ def render():
                             status_widget=status,
                             cambio_df=cambio_df
                         )
+                    
+                    # ✅ ✅ ✅ AQUI É O LUGAR CERTO ✅ ✅ ✅
+                    if df_final is not None and not df_final.empty:
+                        st.success("Gastos Adicionales concluído!")
+                        df_final = make_arrow_safe(df_final)
+                        st.dataframe(df_final.head(50), width="stretch")
+                    else:
+                        st.warning("Nenhuma informação válida encontrada nos PDFs para Gastos Adicionales.")
+
                     if df_final is not None and not df_final.empty:
                         st.success("Gastos Adicionales concluído!")
                         df_final = make_arrow_safe(df_final)
