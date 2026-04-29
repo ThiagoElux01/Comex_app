@@ -1,5 +1,5 @@
-# services/externos_service.py
 from io import BytesIO
+import gc
 import pandas as pd
 import fitz  # PyMuPDF
 from typing import List, Optional
@@ -65,26 +65,43 @@ def process_externos_streamlit(
     if not uploaded_files:
         return None
 
+    BATCH_SIZE = 10  # 🔥 ajuste seguro para Streamlit Cloud
     rows = []
     total = len(uploaded_files)
 
-    # --------------------------------------------
-    # Leitura dos PDFs para DataFrame
-    # --------------------------------------------
-    for i, f in enumerate(uploaded_files, start=1):
-        fname = getattr(f, "name", f"arquivo_{i}.pdf")
-        text = _extract_text_from_pdf_bytes(f.getvalue())
-        rows.append({"source_file": fname, "conteudo_pdf": text})
+    # -------------------------------------------------
+    # Leitura dos PDFs EM BATCH (controle de memória)
+    # -------------------------------------------------
+    for start in range(0, total, BATCH_SIZE):
+        batch = uploaded_files[start : start + BATCH_SIZE]
 
-        if progress_widget:
-            pct = int(i / total * 100)
-            progress_widget.progress(pct, text=f"Lendo {fname} ({i}/{total})")
-        if status_widget:
-            status_widget.write(f"📄 Lido: **{fname}**")
+        for idx, f in enumerate(batch, start=start + 1):
+            fname = getattr(f, "name", f"arquivo_{idx}.pdf")
+
+            try:
+                text = _extract_text_from_pdf_bytes(f.getvalue())
+            except Exception:
+                text = "[Erro ao ler PDF]"
+
+            rows.append(
+                {
+                    "source_file": fname,
+                    "conteudo_pdf": text,
+                }
+            )
+
+            if progress_widget:
+                pct = int(idx / total * 100)
+                progress_widget.progress(pct, text=f"Lendo {fname} ({idx}/{total})")
+            if status_widget:
+                status_widget.write(f"📄 Lido: **{fname}**")
+
+        # 🔥 libera memória entre lotes
+        gc.collect()
 
     df = pd.DataFrame(rows)
 
-    # ========== PIPELINE PRINCIPAL ==========
+    # ================= PIPELINE PRINCIPAL =================
     df = identificar_Proveedor(df)
     df = adicionar_provedor_iscala(df)
     df = extrair_factura(df)
@@ -108,89 +125,64 @@ def process_externos_streamlit(
     df = adicionar_tip_fac_ext(df)
 
     # =============================
-    # Merge PEC / dados do SharePoint
+    # Merge PEC / SharePoint
     # =============================
     from services.externos_utils import adicionar_pec_sharepoint
 
     sharepoint_df = st.session_state.get("sharepoint_df")
-
-    # defensivo: a função no utils pode retornar tuple por engano; normalizamos para DF
     df_sp = adicionar_pec_sharepoint(df, sharepoint_df)
-    if isinstance(df_sp, tuple):
-        df = df_sp[0]
-    else:
-        df = df_sp
+    df = df_sp[0] if isinstance(df_sp, tuple) else df_sp
 
-    # ------------------------------------------
-    # COMPLEMENTAR CAMPOS VAZIOS (EXTERNOS)
-    # ------------------------------------------
+    # ------------------------------
+    # Complementar campos vazios
+    # ------------------------------
     def preencher_vazio(dest_col, src_col):
         if dest_col in df.columns and src_col in df.columns:
-            df[dest_col] = df[dest_col].fillna("").replace("", None)
-            df[src_col] = df[src_col].fillna("").replace("", None)
             df[dest_col] = df[dest_col].combine_first(df[src_col])
 
-    # 1) R.U.C ← fornecedor (coluna "proveedor" do SharePoint)
     preencher_vazio("R.U.C", "proveedor")
-
-    # 2) Proveedor Iscala ← proveedor (SharePoint)
     preencher_vazio("Proveedor Iscala", "proveedor")
-
-    # 2b) fallback adicional: se ainda vazio, usa a coluna local "Proveedor" (detectada do PDF)
     preencher_vazio("Proveedor Iscala", "Proveedor")
-
-    # 3) Factura ← numero_de_documento
     preencher_vazio("Factura", "numero_de_documento")
-
-    # 4) Tipo Doc ← tipo_doc
     preencher_vazio("Tipo Doc", "tipo_doc")
-
-    # 5) Fecha de Emisión ← Fecha_Emision (atenção ao acento no destino)
     preencher_vazio("Fecha de Emisión", "Fecha_Emision")
-
-    # 6) Moneda ← moneda
     preencher_vazio("Moneda", "moneda")
-
-    # 7) Amount ← importe_documento
     preencher_vazio("Amount", "importe_documento")
-
-    # 8) Tasa ← Tasa_Sharepoint
     preencher_vazio("Tasa", "Tasa_Sharepoint")
 
-    # ✅ Recalcular códigos agora que "Tipo Doc" pode ter vindo do SharePoint
+    # Reaplicar códigos
     df = adicionar_cod_autorizacion_ext(df)
     df = adicionar_tip_fac_ext(df)
 
     # =============================
-    # Heurística "Lineaabajo"
+    # Heurística Lineaabajo
     # =============================
     MAP_LINEA = {
-        # --- Itens canônicos principais ---
         "REFRIGERATOR": 36,
         "CHEST FREEZER": 35,
         "FREEZER": 35,
         "STOVE": 38,
-        "COOKER": 22,  # categoria genérica de cozinha
-        "OVEN": 38,  # genérico; temos também variantes específicas abaixo
+        "COOKER": 22,
+        "OVEN": 38,
         "ELECTRIC OVEN": 22,
         "GAS OVEN": 38,
-        "MICROWAVE OVEN": 22,  # mantendo seu valor original (lista tinha 38)
+        "MICROWAVE OVEN": 22,
         "WASHING MACHINE": 25,
         "WASHER": 25,
-        "DRYER": 45,  # equivalente a SECADORA
+        "DRYER": 45,
         "SECADORA": 45,
         "VACUUM CLEANER": 10,
         "ROBOTIC VACUUM CLEANERS": 10,
         "STEAM IRON": 34,
-        "GARMENT STEAMER": 24,  # >>> adicionado conforme pedido (24)
+        "GARMENT STEAMER": 24,
         "HANDHELD GARMENT STEAMER": 34,
         "DISHWASHER": 24,
-        "GAS HOB": 38,  # mantendo seu valor original (lista tinha 22)
+        "GAS HOB": 38,
         "COOKER HOOD": 22,
         "COCINA": 22,
         "AIR FRYER": 22,
         "SPLIT AIR CONDITIONER": 41,
-        "AIR CONDITIONER": 41,  # >>> adicionado conforme pedido (41)
+        "AIR CONDITIONER": 41,
         "WATER DISPENSER": 22,
         "WINE COOLER": 22,
         "RICE COOKER": 22,
@@ -199,7 +191,6 @@ def process_externos_streamlit(
         "KETTLE": 34,
         "ELECTRICAL COOKING": 22,
         "SPARE PARTS": 34,
-        # --- Itens que você já usava e fazem sentido manter ---
         "SEC ELEC": 25,
         "KE4CT": 22,
     }
@@ -213,15 +204,14 @@ def process_externos_streamlit(
                 return num
         return None
 
-    # Criar antes de organizar as colunas
     df["Lineaabajo"] = df["conteudo_pdf"].apply(detectar_linea)
 
-    # Organiza e remove duplicatas (uma única vez)
+    # 🔥 REMOVE TEXTO BRUTO O MAIS CEDO POSSÍVEL
+    df.drop(columns=["conteudo_pdf"], inplace=True, errors="ignore")
+    gc.collect()
+
     df = organizar_colunas_externos(df)
     df = remover_duplicatas_source_file(df)
-
-    # Agora sim, remover o conteúdo bruto do PDF
-    df = df.drop(columns=["conteudo_pdf"], errors="ignore")
 
     # Mensagens finais
     if progress_widget:
