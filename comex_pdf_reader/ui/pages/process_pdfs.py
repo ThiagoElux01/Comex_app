@@ -855,14 +855,10 @@ def render():
                             )
                     else:
                         st.warning("Nenhuma informação válida encontrada nos PDFs para Externos.")
+
                 elif acao == "gastos":
-                    df_final = None  # ✅ garante que a variável sempre exista
-                
                     if not ADICIONALES_AVAILABLE:
-                        st.error(
-                            "Gastos Adicionales indisponível: confira dependências "
-                            "e `services/adicionales_service.py`."
-                        )
+                        st.error("Gastos Adicionales indisponível: confira dependências e `services/adicionales_service.py`.")
                     else:
                         cambio_df = st.session_state.get("tasa_df")
                         df_final = process_adicionales_streamlit(
@@ -871,14 +867,20 @@ def render():
                             status_widget=status,
                             cambio_df=cambio_df
                         )
-                
                     if df_final is not None and not df_final.empty:
                         st.success("Gastos Adicionales concluído!")
                         df_final = make_arrow_safe(df_final)
                         st.dataframe(df_final.head(50), width="stretch")
-                        ...
-                    else:
-                        st.warning("Nenhuma informação válida encontrada nos PDFs para Gastos Adicionales.")
+                        col_csv, col_xlsx = st.columns(2)
+                        with col_csv:
+                            st.download_button(
+                                "Baixar CSV (Adicionales)",
+                                data=df_final.to_csv(index=False).encode("utf-8"),
+                                file_name="gastos_adicionales.csv",
+                                mime="text/csv",
+                                width="stretch",
+                                key="adicionales_csv"
+                            )
                         # ✅ ALTERADO: XLSX com DUAS abas
                         with col_xlsx:
                             xlsx_bytes = to_xlsx_bytes_externos_duas_abas(
