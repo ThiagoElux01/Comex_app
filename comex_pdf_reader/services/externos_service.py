@@ -5,6 +5,7 @@ import fitz  # PyMuPDF
 from typing import List, Optional
 import streamlit as st
 
+# Import das funções auxiliares
 from services.externos_utils import (
     identificar_Proveedor,
     adicionar_provedor_iscala,
@@ -24,9 +25,7 @@ from services.externos_utils import (
     op_gravada_negativo_CN_externos,
 )
 
-# ==========================================================
-# Auxiliar: adicionar Tasa
-# ==========================================================
+
 def adicionar_coluna_tasa_externos(df, cambio_df):
     if cambio_df is None or cambio_df.empty or "Fecha de Emisión" not in df.columns:
         return df
@@ -35,7 +34,6 @@ def adicionar_coluna_tasa_externos(df, cambio_df):
     dft["Fecha_tmp"] = pd.to_datetime(
         dft["Fecha de Emisión"], errors="coerce", dayfirst=True
     )
-
     tasa = cambio_df.copy()
     tasa["Data"] = pd.to_datetime(tasa["Data"], errors="coerce", dayfirst=True)
 
@@ -45,26 +43,19 @@ def adicionar_coluna_tasa_externos(df, cambio_df):
         left_on="Fecha_tmp",
         right_on="Data",
     )
-
     dft.rename(columns={"Venta": "Tasa"}, inplace=True)
     dft.drop(columns=["Fecha_tmp", "Data"], inplace=True)
     return dft
 
 
-# ==========================================================
-# Leitura segura de PDF
-# ==========================================================
-def _extract_text(pdf_bytes: bytes) -> str:
+def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
     try:
         with fitz.open(stream=BytesIO(pdf_bytes), filetype="pdf") as doc:
             return "".join(page.get_text() for page in doc)
     except Exception:
-        return ""
+        return "[Erro ao abrir/ler o PDF]"
 
 
-# ==========================================================
-# PIPELINE PRINCIPAL – EXTERNOS (ROBUSTO + AUDITORIA)
-# ==========================================================
 def process_externos_streamlit(
     uploaded_files: List,
     progress_widget=None,
@@ -74,43 +65,28 @@ def process_externos_streamlit(
     if not uploaded_files:
         return None
 
-    BATCH_SIZE = 5  # ✅ seguro para Streamlit Cloud
+    BATCH_SIZE = 10  # 🔹 ALTERAÇÃO CHAVE (mínima)
     total = len(uploaded_files)
-
-    dfs_finais = []
+    dfs_resultado = []
 
     for start in range(0, total, BATCH_SIZE):
-        batch = uploaded_files[start : start + BATCH_SIZE]
+        batch = uploaded_files[start:start + BATCH_SIZE]
         rows = []
 
-        # -----------------------------
-        # Leitura do batch
-        # -----------------------------
-        for idx, f in enumerate(batch, start=start + 1):
-            pdf_bytes = f.getvalue()
-            texto = _extract_text(pdf_bytes)
-
-            rows.append(
-                {
-                    "source_file": f.name,
-                    "conteudo_pdf": texto,
-                }
-            )
-
-            del pdf_bytes
-            del texto
+        for i, f in enumerate(batch, start=start + 1):
+            fname = getattr(f, "name", f"arquivo_{i}.pdf")
+            text = _extract_text_from_pdf_bytes(f.getvalue())
+            rows.append({"source_file": fname, "conteudo_pdf": text})
 
             if progress_widget:
-                progress_widget.progress(
-                    int(idx / total * 100),
-                    text=f"Lendo {f.name} ({idx}/{total})",
-                )
+                pct = int(i / total * 100)
+                progress_widget.progress(pct, text=f"Lendo {fname} ({i}/{total})")
             if status_widget:
-                status_widget.write(f"📄 {f.name}")
+                status_widget.write(f"📄 Lido: **{fname}**")
 
         df = pd.DataFrame(rows)
 
-        # ================= PIPELINE DE EXTRAÇÃO =================
+        # ========== PIPELINE PRINCIPAL (INALTERADO) ==========
         df = identificar_Proveedor(df)
         df = adicionar_provedor_iscala(df)
         df = extrair_factura(df)
@@ -124,62 +100,51 @@ def process_externos_streamlit(
         df = op_gravada_negativo_CN_externos(df)
         df = adicionar_erro(df)
 
-        # ==================================================
-        # COLUNAS DE AUDITORIA (técnicas)
-        # ==================================================
-        COLUNAS_AUDITORIA = [
-            "proveedor",
-            "importe_documento",
-            "moneda",
-            "tipo_doc",
-            "numero_de_documento",
-            "Fecha_Emision",
-        ]
+        # Tasa (opcional)
+        df = adicionar_coluna_tasa_externos(df, cambio_df=cambio_df)
+        if "Cod. Moneda" in df.columns:
+            df.loc[df["Cod. Moneda"] == "00", "Tasa"] = 1
 
-        for col in COLUNAS_AUDITORIA:
-            if col not in df.columns:
-                df[col] = None
-
-        # ------------------------------
-        # COPIAR CONTEÚDO DAS COLUNAS FINAIS → TÉCNICAS
-        # ------------------------------
-        MAP_COPY = {
-            "proveedor": "Proveedor",
-            "importe_documento": "Amount",
-            "moneda": "Moneda",
-            "tipo_doc": "Tipo Doc",
-            "numero_de_documento": "Factura",
-            "Fecha_Emision": "Fecha de Emisión",
-        }
-
-        for dest, src in MAP_COPY.items():
-            if dest in df.columns and src in df.columns:
-                df[dest] = df[dest].combine_first(df[src])
-
-        # ------------------------------
-        # Tasa e códigos
-        # ------------------------------
-        df = adicionar_coluna_tasa_externos(df, cambio_df)
+        # Códigos
         df = adicionar_cod_autorizacion_ext(df)
         df = adicionar_tip_fac_ext(df)
 
-        # ==================================================
-        # Heurística Lineaabajo
-        # ==================================================
+        # =============================
+        # Merge PEC / dados do SharePoint
+        # =============================
+        from services.externos_utils import adicionar_pec_sharepoint
+
+        sharepoint_df = st.session_state.get("sharepoint_df")
+        df_sp = adicionar_pec_sharepoint(df, sharepoint_df)
+        df = df_sp[0] if isinstance(df_sp, tuple) else df_sp
+
+        # ------------------------------------------
+        # COMPLEMENTAR CAMPOS VAZIOS (EXTERNOS)
+        # ------------------------------------------
+        def preencher_vazio(dest_col, src_col):
+            if dest_col in df.columns and src_col in df.columns:
+                df[dest_col] = df[dest_col].combine_first(df[src_col])
+
+        preencher_vazio("R.U.C", "proveedor")
+        preencher_vazio("Proveedor Iscala", "proveedor")
+        preencher_vazio("Proveedor Iscala", "Proveedor")
+        preencher_vazio("Factura", "numero_de_documento")
+        preencher_vazio("Tipo Doc", "tipo_doc")
+        preencher_vazio("Fecha de Emisión", "Fecha_Emision")
+        preencher_vazio("Moneda", "moneda")
+        preencher_vazio("Amount", "importe_documento")
+        preencher_vazio("Tasa", "Tasa_Sharepoint")
+
+        df = adicionar_cod_autorizacion_ext(df)
+        df = adicionar_tip_fac_ext(df)
+
+        # Linha abaixo
         MAP_LINEA = {
             "REFRIGERATOR": 36,
-            "CHEST FREEZER": 35,
             "FREEZER": 35,
             "STOVE": 38,
-            "COOKER": 22,
-            "OVEN": 38,
-            "MICROWAVE OVEN": 22,
             "WASHING MACHINE": 25,
-            "WASHER": 25,
-            "DRYER": 45,
-            "SECADORA": 45,
             "AIR CONDITIONER": 41,
-            "SPLIT AIR CONDITIONER": 41,
         }
 
         def detectar_linea(txt):
@@ -193,30 +158,18 @@ def process_externos_streamlit(
 
         df["Lineaabajo"] = df["conteudo_pdf"].apply(detectar_linea)
 
-        # 🔥 DESCARTE IMEDIATO DO TEXTO BRUTO
-        df.drop(columns=["conteudo_pdf"], inplace=True, errors="ignore")
-
-        # ------------------------------
-        # Organização final
-        # ------------------------------
         df = organizar_colunas_externos(df)
         df = remover_duplicatas_source_file(df)
+        df = df.drop(columns=["conteudo_pdf"], errors="ignore")
 
-        # Garante novamente auditoria após reorganizar
-        for col in COLUNAS_AUDITORIA:
-            if col not in df.columns:
-                df[col] = None
-
-        dfs_finais.append(df)
+        dfs_resultado.append(df)
 
         del rows
         del df
         gc.collect()
 
-    # ================= CONCAT FINAL =================
-    df_final = pd.concat(dfs_finais, ignore_index=True)
-    del dfs_finais
-    gc.collect()
+    # 🔹 concat final
+    df_final = pd.concat(dfs_resultado, ignore_index=True)
 
     if progress_widget:
         progress_widget.progress(100, text="Concluído (Externos).")
