@@ -24,30 +24,36 @@ from services.externos_utils import (
     op_gravada_negativo_CN_externos,
 )
 
-
-# ==============================
-# Utils
-# ==============================
+# ==========================================================
+# Auxiliar: adicionar Tasa
+# ==========================================================
 def adicionar_coluna_tasa_externos(df, cambio_df):
     if cambio_df is None or cambio_df.empty or "Fecha de Emisión" not in df.columns:
         return df
+
     dft = df.copy()
     dft["Fecha_tmp"] = pd.to_datetime(
         dft["Fecha de Emisión"], errors="coerce", dayfirst=True
     )
+
     tasa = cambio_df.copy()
     tasa["Data"] = pd.to_datetime(tasa["Data"], errors="coerce", dayfirst=True)
+
     dft = dft.merge(
         tasa[["Data", "Venta"]],
         how="left",
         left_on="Fecha_tmp",
         right_on="Data",
     )
+
     dft.rename(columns={"Venta": "Tasa"}, inplace=True)
     dft.drop(columns=["Fecha_tmp", "Data"], inplace=True)
     return dft
 
 
+# ==========================================================
+# Leitura segura de PDF
+# ==========================================================
 def _extract_text(pdf_bytes: bytes) -> str:
     try:
         with fitz.open(stream=BytesIO(pdf_bytes), filetype="pdf") as doc:
@@ -56,9 +62,9 @@ def _extract_text(pdf_bytes: bytes) -> str:
         return ""
 
 
-# ==============================
-# MAIN
-# ==============================
+# ==========================================================
+# PIPELINE PRINCIPAL – EXTERNOS (ROBUSTO)
+# ==========================================================
 def process_externos_streamlit(
     uploaded_files: List,
     progress_widget=None,
@@ -74,32 +80,38 @@ def process_externos_streamlit(
     dfs_finais = []
 
     for start in range(0, total, BATCH_SIZE):
-        batch = uploaded_files[start:start + BATCH_SIZE]
+        batch = uploaded_files[start : start + BATCH_SIZE]
         rows = []
 
+        # -----------------------------
+        # Leitura do batch
+        # -----------------------------
         for idx, f in enumerate(batch, start=start + 1):
             pdf_bytes = f.getvalue()
             texto = _extract_text(pdf_bytes)
 
-            rows.append({
-                "source_file": f.name,
-                "conteudo_pdf": texto
-            })
+            rows.append(
+                {
+                    "source_file": f.name,
+                    "conteudo_pdf": texto,
+                }
+            )
 
+            # libera memória do arquivo individual
             del pdf_bytes
             del texto
 
             if progress_widget:
                 progress_widget.progress(
                     int(idx / total * 100),
-                    text=f"Lendo {f.name} ({idx}/{total})"
+                    text=f"Lendo {f.name} ({idx}/{total})",
                 )
             if status_widget:
                 status_widget.write(f"📄 {f.name}")
 
         df = pd.DataFrame(rows)
 
-        # ================= PIPELINE =================
+        # ================= PIPELINE ORIGINAL =================
         df = identificar_Proveedor(df)
         df = adicionar_provedor_iscala(df)
         df = extrair_factura(df)
@@ -113,43 +125,73 @@ def process_externos_streamlit(
         df = op_gravada_negativo_CN_externos(df)
         df = adicionar_erro(df)
 
+        # ---------- preservar colunas intermediárias ----------
+        COLUNAS_AUDITORIA = [
+            "proveedor",
+            "importe_documento",
+            "moneda",
+            "tipo_doc",
+            "numero_de_documento",
+            "Fecha_Emision",
+        ]
+
+        for col in COLUNAS_AUDITORIA:
+            if col not in df.columns:
+                df[col] = None
+
+        # ---------- Tasa e códigos ----------
         df = adicionar_coluna_tasa_externos(df, cambio_df)
         df = adicionar_cod_autorizacion_ext(df)
         df = adicionar_tip_fac_ext(df)
 
-        # Heurística Lineaabajo (ANTES de dropar texto)
+        # ================= Heurística Lineaabajo =================
         MAP_LINEA = {
             "REFRIGERATOR": 36,
+            "CHEST FREEZER": 35,
             "FREEZER": 35,
             "STOVE": 38,
-            "AIR CONDITIONER": 41,
+            "COOKER": 22,
+            "OVEN": 38,
+            "MICROWAVE OVEN": 22,
             "WASHING MACHINE": 25,
+            "WASHER": 25,
+            "DRYER": 45,
+            "SECADORA": 45,
+            "AIR CONDITIONER": 41,
+            "SPLIT AIR CONDITIONER": 41,
         }
 
         def detectar_linea(txt):
             if not isinstance(txt, str):
                 return None
-            txt = txt.upper()
+            up = txt.upper()
             for k, v in MAP_LINEA.items():
-                if k in txt:
+                if k in up:
                     return v
             return None
 
         df["Lineaabajo"] = df["conteudo_pdf"].apply(detectar_linea)
 
-        # 🔥 CRUCIAL: descartar texto IMEDIATAMENTE
-        df.drop(columns=["conteudo_pdf"], inplace=True)
+        # 🔥 DESCARTE IMEDIATO DO TEXTO BRUTO
+        df.drop(columns=["conteudo_pdf"], inplace=True, errors="ignore")
 
+        # ---------- organização final ----------
         df = organizar_colunas_externos(df)
         df = remover_duplicatas_source_file(df)
 
+        # ---------- garantir novamente colunas de auditoria ----------
+        for col in COLUNAS_AUDITORIA:
+            if col not in df.columns:
+                df[col] = None
+
         dfs_finais.append(df)
 
-        # 🔥 LIMPEZA PESADA
+        # limpeza agressiva
         del rows
         del df
         gc.collect()
 
+    # ================= CONCAT FINAL =================
     df_final = pd.concat(dfs_finais, ignore_index=True)
     del dfs_finais
     gc.collect()
