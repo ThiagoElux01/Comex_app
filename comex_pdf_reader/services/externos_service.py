@@ -63,7 +63,7 @@ def _extract_text(pdf_bytes: bytes) -> str:
 
 
 # ==========================================================
-# PIPELINE PRINCIPAL – EXTERNOS (ROBUSTO)
+# PIPELINE PRINCIPAL – EXTERNOS (ROBUSTO + AUDITORIA)
 # ==========================================================
 def process_externos_streamlit(
     uploaded_files: List,
@@ -97,7 +97,6 @@ def process_externos_streamlit(
                 }
             )
 
-            # libera memória do arquivo individual
             del pdf_bytes
             del texto
 
@@ -111,7 +110,7 @@ def process_externos_streamlit(
 
         df = pd.DataFrame(rows)
 
-        # ================= PIPELINE ORIGINAL =================
+        # ================= PIPELINE DE EXTRAÇÃO =================
         df = identificar_Proveedor(df)
         df = adicionar_provedor_iscala(df)
         df = extrair_factura(df)
@@ -125,7 +124,9 @@ def process_externos_streamlit(
         df = op_gravada_negativo_CN_externos(df)
         df = adicionar_erro(df)
 
-        # ---------- preservar colunas intermediárias ----------
+        # ==================================================
+        # COLUNAS DE AUDITORIA (técnicas)
+        # ==================================================
         COLUNAS_AUDITORIA = [
             "proveedor",
             "importe_documento",
@@ -139,12 +140,32 @@ def process_externos_streamlit(
             if col not in df.columns:
                 df[col] = None
 
-        # ---------- Tasa e códigos ----------
+        # ------------------------------
+        # COPIAR CONTEÚDO DAS COLUNAS FINAIS → TÉCNICAS
+        # ------------------------------
+        MAP_COPY = {
+            "proveedor": "Proveedor",
+            "importe_documento": "Amount",
+            "moneda": "Moneda",
+            "tipo_doc": "Tipo Doc",
+            "numero_de_documento": "Factura",
+            "Fecha_Emision": "Fecha de Emisión",
+        }
+
+        for dest, src in MAP_COPY.items():
+            if dest in df.columns and src in df.columns:
+                df[dest] = df[dest].combine_first(df[src])
+
+        # ------------------------------
+        # Tasa e códigos
+        # ------------------------------
         df = adicionar_coluna_tasa_externos(df, cambio_df)
         df = adicionar_cod_autorizacion_ext(df)
         df = adicionar_tip_fac_ext(df)
 
-        # ================= Heurística Lineaabajo =================
+        # ==================================================
+        # Heurística Lineaabajo
+        # ==================================================
         MAP_LINEA = {
             "REFRIGERATOR": 36,
             "CHEST FREEZER": 35,
@@ -175,18 +196,19 @@ def process_externos_streamlit(
         # 🔥 DESCARTE IMEDIATO DO TEXTO BRUTO
         df.drop(columns=["conteudo_pdf"], inplace=True, errors="ignore")
 
-        # ---------- organização final ----------
+        # ------------------------------
+        # Organização final
+        # ------------------------------
         df = organizar_colunas_externos(df)
         df = remover_duplicatas_source_file(df)
 
-        # ---------- garantir novamente colunas de auditoria ----------
+        # Garante novamente auditoria após reorganizar
         for col in COLUNAS_AUDITORIA:
             if col not in df.columns:
                 df[col] = None
 
         dfs_finais.append(df)
 
-        # limpeza agressiva
         del rows
         del df
         gc.collect()
