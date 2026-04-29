@@ -1039,11 +1039,11 @@ def render():
                         key="sharepoint_xlsx"
                     )
 
-        except ValueError:
-            st.error("❌ A aba 'all' não foi encontrada no arquivo Excel.")
-        except Exception as e:
-            st.error("❌ Erro ao processar o arquivo do SharePoint.")
-            st.exception(e)
+            except ValueError:
+                st.error("❌ A aba 'all' não foi encontrada no arquivo Excel.")
+            except Exception as e:
+                st.error("❌ Erro ao processar o arquivo do SharePoint.")
+                st.exception(e)
 
     with tab4:
         downloads_page.render()
