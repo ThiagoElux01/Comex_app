@@ -857,9 +857,15 @@ def render():
                     else:
                         st.warning("Nenhuma informação válida encontrada nos PDFs para Externos.")
 
+            
                 elif acao == "gastos":
+                    df_final = None  # ✅ OBRIGATÓRIO: garante que sempre exista neste escopo
+                
                     if not ADICIONALES_AVAILABLE:
-                        st.error("Gastos Adicionales indisponível: confira dependências e `services/adicionales_service.py`.")
+                        st.error(
+                            "Gastos Adicionales indisponível: confira dependências "
+                            "e `services/adicionales_service.py`."
+                        )
                     else:
                         cambio_df = st.session_state.get("tasa_df")
                         df_final = process_adicionales_streamlit(
@@ -868,20 +874,15 @@ def render():
                             status_widget=status,
                             cambio_df=cambio_df
                         )
-                    
-                    # ✅ ✅ ✅ AQUI É O LUGAR CERTO ✅ ✅ ✅
+                
+                    # ✅ ÚNICO bloco de uso do df_final
                     if df_final is not None and not df_final.empty:
                         st.success("Gastos Adicionales concluído!")
                         df_final = make_arrow_safe(df_final)
                         st.dataframe(df_final.head(50), width="stretch")
-                    else:
-                        st.warning("Nenhuma informação válida encontrada nos PDFs para Gastos Adicionales.")
-
-                    if df_final is not None and not df_final.empty:
-                        st.success("Gastos Adicionales concluído!")
-                        df_final = make_arrow_safe(df_final)
-                        st.dataframe(df_final.head(50), width="stretch")
+                
                         col_csv, col_xlsx = st.columns(2)
+                
                         with col_csv:
                             st.download_button(
                                 "Baixar CSV (Adicionales)",
@@ -891,7 +892,7 @@ def render():
                                 width="stretch",
                                 key="adicionales_csv"
                             )
-                        # ✅ ALTERADO: XLSX com DUAS abas
+                
                         with col_xlsx:
                             xlsx_bytes = to_xlsx_bytes_externos_duas_abas(
                                 df_normal=df_final,
@@ -907,8 +908,11 @@ def render():
                                 width="stretch",
                                 key="adicionales_xlsx"
                             )
+                
                     else:
-                        st.warning("Nenhuma informação válida encontrada nos PDFs para Gastos Adicionales.")
+                        st.warning(
+                            "Nenhuma informação válida encontrada nos PDFs para Gastos Adicionales."
+                        )
 
     # -------------------------
     # 🌐 Tasa SUNAT
