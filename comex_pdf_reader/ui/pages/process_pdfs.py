@@ -858,6 +858,7 @@ def render():
 
                 elif acao == "gastos":
                     if not ADICIONALES_AVAILABLE:
+                        df_final = None  # ✅ proteção local
                         st.error("Gastos Adicionales indisponível: confira dependências e `services/adicionales_service.py`.")
                     else:
                         cambio_df = st.session_state.get("tasa_df")
