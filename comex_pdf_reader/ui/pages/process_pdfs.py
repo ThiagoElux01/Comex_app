@@ -720,7 +720,6 @@ def render():
                 st.rerun()
 
             if run_clicked and uploaded_files:
-                df_final = None
                 acao = st.session_state.acao_selecionada
                 nome_acao = ACTIONS[acao]
                 status = st.empty()
