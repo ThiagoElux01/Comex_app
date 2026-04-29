@@ -940,6 +940,101 @@ def render():
     # -------------------------
     # 📁 Arquivo Sharepoint
     # -------------------------
+    # -------------------------
+# 📁 Arquivo Sharepoint
+# -------------------------
+with tab3:
+    # ===============================
+    # ISOLAMENTO DE ESTADO - SHAREPOINT
+    # ===============================
+    if st.session_state.get("acao_selecionada") != "sharepoint":
+        st.session_state["acao_selecionada"] = "sharepoint"
+        st.session_state["tasa_df"] = None
+        st.session_state["uploader_key"] = "uploader_sharepoint"
+
+    st.subheader("📁 Arquivo Sharepoint")
+    st.caption("Carregue um arquivo Excel para leitura da aba 'all'.")
+
+    uploaded_excel = st.file_uploader(
+        "Carregar Arquivo",
+        type=["xlsx", "xls"],
+        key="sharepoint_excel_uploader"
+    )
+
+    if uploaded_excel:
+        try:
+            import io
+            import pandas as pd
+
+            uploaded_excel.seek(0)
+            xls = pd.ExcelFile(
+                io.BytesIO(uploaded_excel.read()),
+                engine="openpyxl"
+            )
+
+            if "all" not in xls.sheet_names:
+                raise ValueError(
+                    f"A aba 'all' não foi encontrada. Abas disponíveis: {xls.sheet_names}"
+                )
+
+            df_all = pd.read_excel(
+                xls,
+                sheet_name="all",
+                header=0,
+                usecols="A:Z",
+                nrows=20000
+            )
+
+            from services.sharepoint_utils import ajustar_sharepoint_df
+            df_all = ajustar_sharepoint_df(df_all)
+
+            st.session_state["sharepoint_df"] = df_all
+
+            st.success("✔️ DataFrame atualizado")
+            st.dataframe(df_all, use_container_width=True, height=500)
+
+            st.subheader("⬇️ Downloads do Arquivo SharePoint")
+            col_csv, col_xlsx = st.columns(2)
+
+            with col_csv:
+                st.download_button(
+                    "Baixar CSV (SharePoint)",
+                    data=df_all.to_csv(index=False).encode("utf-8"),
+                    file_name="sharepoint_all.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                    key="sharepoint_csv"
+                )
+
+            with col_xlsx:
+                buffer = BytesIO()
+                with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                    df_all.to_excel(writer, index=False, sheet_name="SharePoint")
+                    ws = writer.book["SharePoint"]
+
+                    if USE_PRN_WIDTHS and df_all.shape[1] in (24, 13):
+                        widths = PRN_WIDTHS_1 if df_all.shape[1] == 24 else PRN_WIDTHS_2
+                        set_fixed_widths(ws, widths, start_col=1)
+                    else:
+                        _autofit_worksheet(ws)
+
+                buffer.seek(0)
+                st.download_button(
+                    "Baixar XLSX (SharePoint)",
+                    data=buffer,
+                    file_name="sharepoint_all.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="sharepoint_xlsx"
+                )
+
+        except ValueError as e:
+            st.error(f"❌ {e}")
+
+        except Exception as e:
+            st.error("❌ Erro ao processar o arquivo do SharePoint.")
+            st.exception(e)
+            
     with tab3:
     # ===============================
     # ISOLAMENTO DE ESTADO - SHAREPOINT
