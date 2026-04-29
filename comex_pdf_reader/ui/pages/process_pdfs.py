@@ -1033,6 +1033,13 @@ def render():
     
                     buffer.seek(0)
                     st.download_button(
+                    "Baixar XLSX (SharePoint)",
+                    data=buffer,
+                    file_name="sharepoint_all.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    width="stretch",
+                    key="sharepoint_xlsx"
+                )
 
     with tab4:
         downloads_page.render()
