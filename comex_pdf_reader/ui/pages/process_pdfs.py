@@ -868,6 +868,7 @@ def render():
                             cambio_df=cambio_df
                         )
                     if df_final is not None and not df_final.empty:
+                        df_final = None  # ✅ inicialização defensiva
                         st.success("Gastos Adicionales concluído!")
                         df_final = make_arrow_safe(df_final)
                         st.dataframe(df_final.head(50), width="stretch")
