@@ -16,8 +16,9 @@ def adicionar_tasa_sharepoint(df: pd.DataFrame, tasa_df: pd.DataFrame | None) ->
     df = df.copy()
 
     # Garante coluna
-    if "Tasa_Sharepoint" not in df.columns:
-        df["Tasa_Sharepoint"] = ""
+    
+    if "tasa_sharepoint" not in df.columns:
+    df["tasa_sharepoint"] = ""
 
     # Se não houver Tasa SUNAT carregada, retorna como está
     if tasa_df is None or tasa_df.empty:
@@ -56,14 +57,18 @@ def adicionar_tasa_sharepoint(df: pd.DataFrame, tasa_df: pd.DataFrame | None) ->
     # ------------------------------------------------------------
     # 4) Renomear e limpar
     # ------------------------------------------------------------
-    df.rename(columns={"Venta": "Tasa_Sharepoint"}, inplace=True)
+    df.rename(columns={"Venta": "tasa_sharepoint"}, inplace=True)
     df.drop(columns=["Fecha_Emision_tmp", "Data"], inplace=True, errors="ignore")
 
     # ------------------------------------------------------------
     # 5) FORÇAR string (crítico p/ pandas + pyarrow)
     # ------------------------------------------------------------
-    df["Tasa_Sharepoint"] = df["Tasa_Sharepoint"].astype("string")
-
+    df["tasa_sharepoint"] = df["tasa_sharepoint"].astype("string)
+                                                         
+    # Padronizar nome final esperado pelos fluxos
+    if "tasa_sharepoint" in df.columns:
+        df.rename(columns={"tasa_sharepoint": "Tasa_Sharepoint"}, inplace=True)
+                                                         
     return df
 
 
@@ -149,9 +154,9 @@ def ajustar_sharepoint_df(df: pd.DataFrame) -> pd.DataFrame:
     # ------------------------------------------------------------
     # 0) Garantir Tasa_Sharepoint como STRING desde o início
     # ------------------------------------------------------------
-    if "Tasa_Sharepoint" not in df.columns:
-        df["Tasa_Sharepoint"] = ""
-    df["Tasa_Sharepoint"] = df["Tasa_Sharepoint"].astype("string")
+    #if "Tasa_Sharepoint" not in df.columns:
+    #    df["Tasa_Sharepoint"] = ""
+    #df["Tasa_Sharepoint"] = df["Tasa_Sharepoint"].astype("string")
 
     # ------------------------------------------------------------
     # 1) Normalizar nomes das colunas
