@@ -1017,29 +1017,33 @@ def render():
                         width="stretch",
                         key="sharepoint_csv"
                     )
-    
                 with col_xlsx:
                     buffer = BytesIO()
                     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
                         df_all.to_excel(writer, index=False, sheet_name="SharePoint")
                         ws = writer.book["SharePoint"]
-    
-                        # aplica PRN widths apenas se fizer sentido
+
                         if USE_PRN_WIDTHS and df_all.shape[1] in (24, 13):
                             widths = PRN_WIDTHS_1 if df_all.shape[1] == 24 else PRN_WIDTHS_2
                             set_fixed_widths(ws, widths, start_col=1)
                         else:
                             _autofit_worksheet(ws)
-    
+
                     buffer.seek(0)
                     st.download_button(
-                    "Baixar XLSX (SharePoint)",
-                    data=buffer,
-                    file_name="sharepoint_all.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    width="stretch",
-                    key="sharepoint_xlsx"
-                )
+                        "Baixar XLSX (SharePoint)",
+                        data=buffer,
+                        file_name="sharepoint_all.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        width="stretch",
+                        key="sharepoint_xlsx"
+                    )
+
+    except ValueError:
+        st.error("❌ A aba 'all' não foi encontrada no arquivo Excel.")
+    except Exception as e:
+        st.error("❌ Erro ao processar o arquivo do SharePoint.")
+        st.exception(e)
 
     with tab4:
         downloads_page.render()
