@@ -1,42 +1,11 @@
-# services/adicionales_service.py
 from io import BytesIO
 import gc
-from typing import List, Optional
-
 import pandas as pd
-import fitz  # PyMuPDF
+import fitz
 import streamlit as st
 
-# Utils
-from services.adicionales_utils import (
-    extrair_ruc,
-    extrair_facturas,
-    remover_ruc_indesejado,
-    criar_coluna_proveedor_iscala,
-    extrair_fecha_emision,
-    normalizar_data,
-    extrair_moneda,
-    ajustar_e_padronizar_moneda,
-    codificar_moneda,
-    extrair_op_gravada,
-    limpar_op_gravada,
-    formatar_op_gravada,
-    op_gravada_negativo_CN,
-    extrair_tipo_doc,
-    padronizar_tipo_doc,
-    adicionar_cod_autorizacion_adicionales,
-    adicionar_tip_doc_adicionales,
-    organizar_colunas_adicionales,
-    remover_duplicatas_source_file,
-    adicionar_sharepoint_adicionales,
-)
+from services.adicionales_utils import *
 
-from services.duas_utils import adicionar_coluna_tasa
-
-
-# ------------------------------------------------------------
-# Leitura segura do PDF
-# ------------------------------------------------------------
 def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
     try:
         with fitz.open(stream=BytesIO(pdf_bytes), filetype="pdf") as doc:
@@ -44,42 +13,30 @@ def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
     except Exception:
         return ""
 
-
-# ------------------------------------------------------------
-# FUNÇÃO PRINCIPAL (STREAMLIT)
-# ------------------------------------------------------------
 def process_adicionales_streamlit(
-    uploaded_files: List,
+    uploaded_files,
     progress_widget=None,
     status_widget=None,
-    cambio_df: Optional[pd.DataFrame] = None,
-) -> pd.DataFrame:
-    """
-    ⚠️ IMPORTANTE:
-    Esta função SEMPRE retorna um DataFrame (mesmo vazio).
-    Isso evita UnboundLocalError no process_pdfs.py sem precisar alterá-lo.
-    """
-
-    # ✅ GARANTIA ABSOLUTA
-    df_final = pd.DataFrame()
-
+    cambio_df=None,
+):
     if not uploaded_files:
-        return df_final
+        return None
 
-    rows = []
+    BATCH_SIZE = 10   # ✅ igual ao Externos
     total = len(uploaded_files)
+    dfs_resultado = []
 
-    try:
-        for i, f in enumerate(uploaded_files, start=1):
+    for start in range(0, total, BATCH_SIZE):
+        batch = uploaded_files[start:start + BATCH_SIZE]
+        rows = []
+
+        for i, f in enumerate(batch, start=start + 1):
             fname = getattr(f, "name", f"arquivo_{i}.pdf")
             texto = _extract_text_from_pdf_bytes(f.getvalue())
-
-            rows.append(
-                {
-                    "source_file": fname,
-                    "conteudo_pdf": texto,
-                }
-            )
+            rows.append({
+                "source_file": fname,
+                "conteudo_pdf": texto
+            })
 
             if progress_widget:
                 pct = int(i / total * 100)
@@ -87,32 +44,21 @@ def process_adicionales_streamlit(
             if status_widget:
                 status_widget.write(f"📄 Lido: **{fname}**")
 
-        if not rows:
-            return df_final
-
         df = pd.DataFrame(rows)
 
-        # -----------------------------
-        # PIPELINE ADICIONALES
-        # -----------------------------
+        # -------- PIPELINE ADICIONALES --------
         df["R.U.C"] = df["conteudo_pdf"].apply(extrair_ruc)
-        df = remover_ruc_indesejado(df)
         df["Factura"] = df["conteudo_pdf"].apply(extrair_facturas)
+
         df = criar_coluna_proveedor_iscala(df)
 
-        df["Fecha de Emisión"] = (
-            df["conteudo_pdf"]
-            .apply(extrair_fecha_emision)
-            .apply(normalizar_data)
-        )
+        df["Fecha de Emisión"] = df["conteudo_pdf"].apply(extrair_fecha_emision)
+        df["Fecha de Emisión"] = df["Fecha de Emisión"].apply(normalizar_data)
 
-        df["Moneda"] = (
-            df["conteudo_pdf"]
-            .apply(extrair_moneda)
-            .apply(ajustar_e_padronizar_moneda)
-        )
-
+        df["Moneda"] = df["conteudo_pdf"].apply(extrair_moneda)
+        df["Moneda"] = df["Moneda"].apply(ajustar_e_padronizar_moneda)
         df["Cod. Moneda"] = df["Moneda"].apply(codificar_moneda)
+        df["Cuenta"] = df["Cod. Moneda"].apply(atribuir_cuenta)
 
         df["Tipo Doc"] = df.apply(extrair_tipo_doc, axis=1)
         df = padronizar_tipo_doc(df)
@@ -122,40 +68,35 @@ def process_adicionales_streamlit(
         df["Op. Gravada"] = df["Op. Gravada"].apply(formatar_op_gravada)
         df = op_gravada_negativo_CN(df)
 
-        # -----------------------------
-        # TASA (reaproveita DUAS)
-        # -----------------------------
-        df = adicionar_coluna_tasa(df, cambio_df=cambio_df)
-        if "Cod. Moneda" in df.columns:
-            df.loc[df["Cod. Moneda"] == "00", "Tasa"] = 1
+        df = Ajustar_nro_nota_credito(df)
 
-        # -----------------------------
-        # SHAREPOINT (opcional)
-        # -----------------------------
+        # SharePoint
         sharepoint_df = st.session_state.get("sharepoint_df")
         df = adicionar_sharepoint_adicionales(df, sharepoint_df)
 
-        # -----------------------------
-        # CÓDIGOS SUNAT
-        # -----------------------------
+        # Códigos
         df = adicionar_cod_autorizacion_adicionales(df)
         df = adicionar_tip_doc_adicionales(df)
 
-        # -----------------------------
-        # ORGANIZAÇÃO FINAL
-        # -----------------------------
+        df["Error"] = df["Factura"].apply(error)
+
+        # Organiza
         df = organizar_colunas_adicionales(df)
         df = remover_duplicatas_source_file(df)
 
-        df_final = df.copy()
+        # ✅ remove texto bruto cedo
+        df = df.drop(columns=["conteudo_pdf"], errors="ignore")
 
-    except Exception as e:
-        if status_widget:
-            status_widget.error("❌ Erro no processamento de Gastos Adicionales.")
-            status_widget.exception(e)
+        dfs_resultado.append(df)
 
-    finally:
+        del rows, df
         gc.collect()
 
-    # ✅ SEMPRE retorna um DataFrame
+    df_final = pd.concat(dfs_resultado, ignore_index=True)
+
+    if progress_widget:
+        progress_widget.progress(100, text="Concluído (Adicionales).")
+    if status_widget:
+        status_widget.success("Pipeline Adicionales finalizado.")
+
     return df_final
