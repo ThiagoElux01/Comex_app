@@ -29,14 +29,12 @@ from services.externos_utils import (
 def adicionar_coluna_tasa_externos(df, cambio_df):
     if cambio_df is None or cambio_df.empty or "Fecha de Emisión" not in df.columns:
         return df
-
     dft = df.copy()
     dft["Fecha_tmp"] = pd.to_datetime(
         dft["Fecha de Emisión"], errors="coerce", dayfirst=True
     )
     tasa = cambio_df.copy()
     tasa["Data"] = pd.to_datetime(tasa["Data"], errors="coerce", dayfirst=True)
-
     dft = dft.merge(
         tasa[["Data", "Venta"]],
         how="left",
@@ -65,8 +63,9 @@ def process_externos_streamlit(
     if not uploaded_files:
         return None
 
-    BATCH_SIZE = 10  # 🔹 ALTERAÇÃO CHAVE (mínima)
+    BATCH_SIZE = 10  # 🔹 NOVO → permite muitos PDFs sem estourar memória
     total = len(uploaded_files)
+
     dfs_resultado = []
 
     for start in range(0, total, BATCH_SIZE):
@@ -135,14 +134,20 @@ def process_externos_streamlit(
         preencher_vazio("Amount", "importe_documento")
         preencher_vazio("Tasa", "Tasa_Sharepoint")
 
+        # ✅ Recalcular códigos
         df = adicionar_cod_autorizacion_ext(df)
         df = adicionar_tip_fac_ext(df)
 
-        # Linha abaixo
+        # =============================
+        # Heurística Lineaabajo (PDF)
+        # =============================
         MAP_LINEA = {
             "REFRIGERATOR": 36,
+            "CHEST FREEZER": 35,
             "FREEZER": 35,
             "STOVE": 38,
+            "COOKER": 22,
+            "OVEN": 38,
             "WASHING MACHINE": 25,
             "AIR CONDITIONER": 41,
         }
@@ -158,8 +163,15 @@ def process_externos_streamlit(
 
         df["Lineaabajo"] = df["conteudo_pdf"].apply(detectar_linea)
 
+        # 🔹 NOVO → fallback com PG
+        if "PG" in df.columns:
+            df["Lineaabajo"] = df["Lineaabajo"].combine_first(df["PG"])
+
+        # Organiza e remove duplicatas
         df = organizar_colunas_externos(df)
         df = remover_duplicatas_source_file(df)
+
+        # Remove texto bruto
         df = df.drop(columns=["conteudo_pdf"], errors="ignore")
 
         dfs_resultado.append(df)
@@ -168,7 +180,6 @@ def process_externos_streamlit(
         del df
         gc.collect()
 
-    # 🔹 concat final
     df_final = pd.concat(dfs_resultado, ignore_index=True)
 
     if progress_widget:
