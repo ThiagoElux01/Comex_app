@@ -948,7 +948,6 @@ def render():
         # ISOLAMENTO DE ESTADO - SHAREPOINT
         # ===============================
         if st.session_state.get("acao_selecionada") != "sharepoint":
-            st.session_state["tasa_df"] = None
             st.session_state["uploader_key"] = "uploader_sharepoint"
     
         st.subheader("📁 Arquivo Sharepoint")
