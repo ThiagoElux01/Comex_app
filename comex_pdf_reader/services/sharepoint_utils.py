@@ -63,7 +63,7 @@ def adicionar_tasa_sharepoint(df: pd.DataFrame, tasa_df: pd.DataFrame | None) ->
     # ------------------------------------------------------------
     # 5) FORÇAR string (crítico p/ pandas + pyarrow)
     # ------------------------------------------------------------
-    df["tasa_sharepoint"] = df["tasa_sharepoint"].astype("string)
+    df["tasa_sharepoint"] = df["tasa_sharepoint"].astype("string")
                                                          
     # Padronizar nome final esperado pelos fluxos
     if "tasa_sharepoint" in df.columns:
