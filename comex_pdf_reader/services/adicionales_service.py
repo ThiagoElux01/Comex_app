@@ -2,7 +2,6 @@
 # services/adicionales_service.py
 from io import BytesIO
 from typing import List, Optional
-import fitz  # PyMuPDF
 import pandas as pd
 import streamlit as st
 
@@ -18,12 +17,13 @@ from services.adicionales_utils import (
 
 def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
     try:
+        import fitz  # ✅ import local, só quando necessário
         with fitz.open(stream=BytesIO(pdf_bytes), filetype="pdf") as doc:
             text = "".join(page.get_text() for page in doc)
             return text if text.strip() else "[PDF baseado em imagem - sem texto extraível]"
-    except Exception:
-        return "[Erro ao abrir/ler o PDF]"
-
+    except Exception as e:
+        return f"[Erro ao abrir/ler o PDF: {e}]"
+        
 def process_adicionales_streamlit(
     uploaded_files: List,
     progress_widget=None,
